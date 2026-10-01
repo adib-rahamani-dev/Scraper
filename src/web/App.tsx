@@ -10,6 +10,9 @@ import type { BuiltInSourceId, Campaign, DashboardData, Lead, Project, Run, Sour
 import CloudCaptureView from './CloudCaptureView';
 import HistoryControls from './HistoryControls';
 import RadarWorkspace from './RadarWorkspace';
+import CombinedExportControl from './CombinedExportControl';
+import LeadBankCleanup from './LeadBankCleanup';
+import './bank-actions.css';
 
 type View = 'dashboard' | 'analytics' | 'projects' | 'leads' | 'captured' | 'runs' | 'exports' | 'settings';
 class AuthRequiredError extends Error {}
@@ -212,11 +215,12 @@ export default function App() {
         </header>
 
         <section className="workspace">
+          <CombinedExportControl/>
           {loading && !dashboard ? <LoadingState /> : <>
             {view === 'dashboard' && <RadarWorkspace publicLeads={filteredLeads} campaignId={selectedCampaignId} onPublicSearch={(topic,city)=>launchCampaign(topic,city,['iran-tejarat','niyazban'],false)} onChanged={()=>void loadAll(true)}/>}
             {view === 'analytics' && <Dashboard data={dashboard!} projects={projects} campaigns={campaigns} sources={sources} onLaunch={launchCampaign} onAdvanced={() => setModalOpen(true)} onNavigate={setView} />}
             {view === 'projects' && <CampaignsView campaigns={campaigns} projects={projects} onNew={() => setTopicModalOpen(true)} onAdvanced={() => setModalOpen(true)} onRetry={retryCampaign} onResults={(campaign) => { setSelectedCampaignId(campaign.id); setView('leads'); }} />}
-            {view === 'leads' && <LeadsView leads={filteredLeads} projects={projects} campaigns={campaigns} selectedCampaignId={selectedCampaignId} onCampaignChange={setSelectedCampaignId} onUpdate={updateLead} />}
+            {view === 'leads' && <LeadsView leads={filteredLeads} projects={projects} campaigns={campaigns} selectedCampaignId={selectedCampaignId} onCampaignChange={setSelectedCampaignId} onUpdate={updateLead} onChanged={()=>void loadAll(true)}/>}
             {view === 'captured' && <CloudCaptureView />}
             {view === 'runs' && <RunsView runs={runs} onRefresh={() => void loadAll(true)} />}
             {view === 'exports' && <ExportsView leads={leads} projects={projects} />}
@@ -333,12 +337,13 @@ function CampaignsView({ campaigns, projects, onNew, onAdvanced, onRetry, onResu
   </>;
 }
 
-function LeadsView({ leads, campaigns, selectedCampaignId, onCampaignChange, onUpdate }: { leads: Lead[]; projects: Project[]; campaigns: Campaign[]; selectedCampaignId: number | null; onCampaignChange: (id: number | null) => void; onUpdate: (lead: Lead, status: Lead['status']) => void }) {
+function LeadsView({ leads, campaigns, selectedCampaignId, onCampaignChange, onUpdate,onChanged }: { leads: Lead[]; projects: Project[]; campaigns: Campaign[]; selectedCampaignId: number | null; onCampaignChange: (id: number | null) => void; onUpdate: (lead: Lead, status: Lead['status']) => void;onChanged:()=>void }) {
   const [status, setStatus] = useState('all');
   const visible = leads.filter((lead) => status === 'all' || lead.status === status);
   const exportHref = selectedCampaignId ? `/api/campaigns/${selectedCampaignId}/export.csv` : '/api/export.csv';
   return <>
     <PageHead eyebrow="خروجی تجمیعی" title="بانک سرنخ‌ها" description={`${faNumber(visible.length)} مخاطب عمومی پس از پاک‌سازی و حذف موارد تکراری`} actions={<a className="primary-button anchor-button" href={exportHref}><Download size={18} /> خروجی یکجا</a>} />
+    <LeadBankCleanup onChanged={onChanged}/>
     <div className="filterbar"><div><Filter size={17} /><span>فیلترها</span></div><select value={selectedCampaignId ?? 'all'} onChange={(event) => onCampaignChange(event.target.value === 'all' ? null : Number(event.target.value))}><option value="all">همه پویش‌ها</option>{campaigns.map((campaign) => <option value={campaign.id} key={campaign.id}>{campaign.topic}</option>)}</select><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">همه وضعیت‌ها</option><option value="new">جدید</option><option value="qualified">باارزش</option><option value="contacted">پیگیری‌شده</option><option value="excluded">کنارگذاشته</option></select><button className="future-filter" disabled><MapPin size={14} /> منطقه — نسخه بعد</button><span className="filter-count">{faNumber(visible.length)} نتیجه</span></div>
     <section className="panel table-panel"><LeadsTable leads={visible} onUpdate={onUpdate} /></section>
   </>;

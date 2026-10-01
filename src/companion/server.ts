@@ -37,6 +37,7 @@ app.get('/api/state', (_req, res) => {
   res.json({ sources: sources.map(source => ({ source, open: browserOpen(source) })), count, cities: campaignCities });
 });
 app.get('/api/data/status',(_req,res)=>res.json(dataResetStatus(db,'companion')));
+app.get('/api/export-records',(_req,res)=>res.json({ads:db.prepare('SELECT * FROM saved_ads ORDER BY saved_at DESC').all()}));
 app.post('/api/data/reset',(req,res)=>res.json(resetData(db,'companion',req.body??{})));
 app.post('/api/data/restore',(req,res)=>res.json(restoreData(db,'companion',req.body??{})));
 app.post('/api/browser/:source/open', async (req, res) => {

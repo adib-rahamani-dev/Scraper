@@ -11,7 +11,9 @@ import { validatePublicUrl } from './policy.js';
 import { buildSourceSearchUrl, normalizeCity, normalizeTopic, sourceCatalog } from './source-catalog.js';
 import { capturedCsv, extensionTokenStatus, importCapturedAds, issueExtensionToken, listCapturedAds, revokeExtensionTokens, saveCapturedBatch, saveCapturedContact, updateCapturedAd, validExtensionToken } from './cloud-capture.js';
 import { createCaptureRun, listCaptureRuns, updateCaptureRun } from '../shared/capture-data.js';
-import { adsWorkbook } from './excel-export.js';
+import { adsWorkbook, type ExportAd } from './excel-export.js';
+import { combineExportAds,companionExportAds } from './combined-export.js';
+import {clearLeadBank,restoreLeadBank} from '../shared/lead-cleanup.js';
 import { refreshDatabase } from './db.js';
 import { updateRun, setProjectStatus } from './db.js';
 import { dataResetStatus, resetData, restoreData } from '../shared/data-reset.js';
@@ -286,6 +288,9 @@ app.get('/api/leads', (request, response) => {
   const campaignId = request.query.campaignId ? Number(request.query.campaignId) : undefined;
   response.json(listLeads({ projectId, campaignId, search: String(request.query.search ?? ''), status: request.query.status ? String(request.query.status) : undefined, limit: Number(request.query.limit ?? 300) }));
 });
+for(const [action,handler] of [['clear',clearLeadBank],['restore',restoreLeadBank]] as const)app.post(`/api/leads/bank/${action}`,async(request,response)=>{
+  try{const result=handler(db,request.body??{});await persistDatabase();response.json(result);}catch(error){response.status(400).json({error:error instanceof Error?error.message:'تغییر بانک سرنخ‌ها ممکن نشد.'});}
+});
 
 app.patch('/api/leads/:id', async (request, response) => {
   const allowed: Lead['status'][] = ['new', 'qualified', 'contacted', 'excluded'];
@@ -314,6 +319,18 @@ function sendCsv(response: express.Response, leads: Lead[], name: string): void 
 app.get('/api/export.csv', (request, response) => {
   const projectId = request.query.projectId ? Number(request.query.projectId) : undefined;
   sendCsv(response, listLeads({ projectId, limit: 100_000 }), 'lead-radar');
+});
+app.get('/api/export/all.xlsx',async(_request,response)=>{
+  try {
+    const count=Number((db.prepare('SELECT COUNT(*) n FROM leads').get() as {n:number}).n);
+    if(count>100000)throw new Error('بانک منابع عمومی بیش از سقف خروجی یکجا است؛ خروجی ناقص ساخته نشد.');
+    const groups=[{origin:'منابع عمومی',ads:listLeads({limit:100000}).map(lead=>({...lead,topic:lead.category,region:'',price:'',description:'',note:'',saved_at:lead.discoveredAt}))},{origin:'بانک افزونه',ads:db.prepare('SELECT * FROM captured_ads ORDER BY saved_at DESC').all() as unknown as ExportAd[]}];
+    if(!isVercel){
+      groups.push({origin:'مرورگر محلی',ads:await companionExportAds()});
+    }
+    const bytes=await adsWorkbook(combineExportAds(groups),'خروجی کلی تمام بانک‌ها');
+    response.setHeader('content-type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');response.setHeader('content-disposition','attachment; filename="lead-radar-all.xlsx"');response.send(bytes);
+  }catch(error){response.status(503).json({error:error instanceof Error&&/خروجی|بانک|داده/.test(error.message)?error.message:'همراه محلی در دسترس نیست؛ آن را اجرا کن تا خروجی کلی کامل ساخته شود.'});}
 });
 app.get('/api/export.xlsx',async(request,response)=>{const leads=listLeads({campaignId:request.query.campaignId?Number(request.query.campaignId):undefined,limit:100000});response.setHeader('content-type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');response.setHeader('content-disposition','attachment; filename="lead-radar.xlsx"');response.send(await adsWorkbook(leads.map(lead=>({...lead,topic:lead.category,region:'',price:'',description:'',note:'',saved_at:lead.discoveredAt}))));});
 
