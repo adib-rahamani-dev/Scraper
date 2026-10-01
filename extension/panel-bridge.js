@@ -1,5 +1,5 @@
 (() => {
-  const allowed=['status','configure','login','search','stop','resume','options'];
+  const allowed=['status','configure','login','search','stop','resume','focus','options'];
   window.addEventListener('message',async event=>{
     if(event.source!==window||event.origin!==location.origin||event.data?.type!=='lead-radar-command'||!allowed.includes(event.data.action))return;
     const {id,action,payload}=event.data;

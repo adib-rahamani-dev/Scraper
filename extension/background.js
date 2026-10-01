@@ -15,9 +15,10 @@ async function api(path,body,method='POST') {
 }
 const jobGet=async()=> (await chrome.storage.local.get('captureJob')).captureJob;
 const jobSave=job=>chrome.storage.local.set({captureJob:job});
+async function badge(paused){try{await chrome.action.setBadgeText({text:paused?'!':''});if(paused)await chrome.action.setBadgeBackgroundColor({color:'#B87524'});}catch{}}
 async function runUpdate(job) { await api(`/api/extension/runs/${job.id}`,{status:job.status,processed:job.processed,failed:job.failed,message:job.message},'PATCH'); }
 async function pause(job,error) {
-  job.status='paused';job.stage='idle';job.message=error?.message||String(error);await jobSave(job);
+  const wasPaused=job.status==='paused';job.status='paused';job.stage='idle';job.message=error?.message||String(error);if(!wasPaused)job.pausedAt=new Date().toISOString();await jobSave(job);await badge(true);
   await chrome.alarms.clear('capture-step');await chrome.alarms.clear('capture-watch');
   await runUpdate(job).catch(()=>{});
 }
@@ -28,11 +29,11 @@ async function startRun(source,search,limit) {
   if(!urls.length)throw new Error('نتیجه‌ای بارگذاری نشده است.');
   const run=await api('/api/extension/runs',{source,...search.context,searchUrl,total:urls.length});
   const job={...run,context:{...search.context,searchUrl},urls,index:0,stage:'idle',tabId:null,api:(await chrome.storage.local.get('leadRadarEndpoint')).leadRadarEndpoint||CLOUD_API};
-  await jobSave(job);await chrome.alarms.create('capture-step',{when:Date.now()+1000});return job;
+  await jobSave(job);await badge(false);await chrome.alarms.create('capture-step',{when:Date.now()+1000});return job;
 }
 async function next() {
   const job=await jobGet();if(!job||job.status!=='running'||job.stage!=='idle')return;
-  if(job.index>=job.urls.length){job.status=job.failed?'partial':'completed';job.message=`پایان: ${job.processed} آگهی کامل، ${job.failed} ناموفق`;await jobSave(job);await runUpdate(job);return;}
+  if(job.index>=job.urls.length){job.status=job.failed?'partial':'completed';job.message=`پایان: ${job.processed} آگهی کامل، ${job.failed} ناموفق`;await jobSave(job);await badge(false);await runUpdate(job);return;}
   if(((await chrome.storage.local.get('leadRadarEndpoint')).leadRadarEndpoint||CLOUD_API)!==job.api){await pause(job,new Error('مقصد اتصال تغییر کرده؛ اجرا متوقف شد.'));return;}
   const paceKey=`capture-next-${job.source}`;
   const nextAt=Number((await chrome.storage.local.get(paceKey))[paceKey]||0);
@@ -41,6 +42,11 @@ async function next() {
   job.stage='loading';job.message=`بازکردن آگهی ${job.index+1} از ${job.total}`;await jobSave(job);
   await chrome.alarms.create('capture-watch',{when:Date.now()+45000});
   try {
+    if(job.reuseTab&&job.tabId!==null){
+      job.reuseTab=false;let tab;try{tab=await chrome.tabs.get(job.tabId);}catch{job.tabId=null;}
+      await jobSave(job);let matching=false;try{matching=Boolean(tab&&official(tab.url,job.source,'v')===job.urls[job.index]);}catch{}
+      if(matching){await chrome.tabs.update(tab.id,{active:true});await collect(tab.id,tab.url);return;}
+    }
     if(job.tabId!==null)await chrome.tabs.update(job.tabId,{url:job.urls[job.index],active:true});
     else {const tab=await chrome.tabs.create({url:'about:blank',active:true});job.tabId=tab.id;await jobSave(job);await chrome.tabs.update(tab.id,{url:job.urls[job.index]});}
   }catch(error){await pause(job,error);}
@@ -82,8 +88,8 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
       if(next>Date.now())throw new Error(`برای رعایت ریت‌لیمیت، ${Math.ceil((next-Date.now())/1000)} ثانیه دیگر تلاش کن.`);
       await chrome.storage.local.set({[key]:Date.now()+30000});return {allowed:true};
     });
-    if(panel&&!['status','configure','login','search','stop','resume','options'].includes(action))throw new Error('دستور پنل نامعتبر است.');
-    if(action==='status'&&(own||panel)){const state=await chrome.storage.local.get(['captureJob','leadRadarToken','leadRadarEndpoint']);return {connected:Boolean(state.leadRadarToken),endpoint:state.leadRadarEndpoint,job:state.captureJob?{status:state.captureJob.status,processed:state.captureJob.processed,total:state.captureJob.total,message:state.captureJob.message}:null};}
+    if(panel&&!['status','configure','login','search','stop','resume','focus','options'].includes(action))throw new Error('دستور پنل نامعتبر است.');
+    if(action==='status'&&(own||panel)){const state=await chrome.storage.local.get(['captureJob','leadRadarToken','leadRadarEndpoint']);const job=state.captureJob;return {connected:Boolean(state.leadRadarToken),endpoint:state.leadRadarEndpoint,job:job?{id:job.id,source:job.source,status:job.status,processed:job.processed,total:job.total,index:job.index,message:job.message,pausedAt:job.pausedAt||'',resumable:job.status==='paused'}:null};}
 if(action==='configure'&&panel){if(typeof message.token!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(message.token))throw new Error('کلید اتصال نامعتبر است.');const endpoint=new URL(sender.url).hostname==='lead-radar-jade.vercel.app'?CLOUD_API:LOCAL_API;const job=await jobGet();if(job&&['running','paused'].includes(job.status))throw new Error('ابتدا اجرای فعال را متوقف کن.');await chrome.storage.local.set({leadRadarToken:message.token,leadRadarEndpoint:endpoint});return {connected:true};}
     if(action==='options'){await chrome.runtime.openOptionsPage();return {};}
     if(action==='dashboard'){const {leadRadarEndpoint}=await chrome.storage.local.get('leadRadarEndpoint');await chrome.tabs.create({url:leadRadarEndpoint===LOCAL_API?'http://127.0.0.1:5173/':CLOUD_API});return {};}
@@ -114,9 +120,17 @@ if(action==='configure'&&panel){if(typeof message.token!=='string'||!/^[A-Za-z0-
       const tab=await chrome.tabs.create({url:'about:blank',active:true});await chrome.storage.local.set({pendingSearch:{tabId:tab.id,source:s,limit:message.limit},searchError:''});await chrome.tabs.update(tab.id,{url});return {};
     }
     if(action==='start-run'&&source && message.search?.source===source)return serial(()=>startRun(source,message.search,message.limit));
+    if(action==='focus'&&(own||panel))return serial(async()=>{
+      const job=await jobGet();if(job?.status!=='paused')throw new Error('صف متوقف‌شده پیدا نشد.');
+      const url=official(job.urls[job.index],job.source,'v');
+      let tab;try{if(job.tabId!==null)tab=await chrome.tabs.get(job.tabId);}catch{}
+      let matching=false;try{matching=Boolean(tab&&official(tab.url,job.source,'v')===url);}catch{}
+      if(matching){await chrome.tabs.update(tab.id,{active:true});return {url};}
+      tab=await chrome.tabs.create({url:'about:blank',active:true});job.tabId=tab.id;await jobSave(job);await chrome.tabs.update(tab.id,{url});return {url};
+    });
     if(['stop','resume'].includes(action))return serial(async()=>{const job=await jobGet();if(!job)return {};
       if(action==='resume'&&job.status!=='paused')throw new Error('فقط اجرای متوقف‌شده قابل ادامه است.');
-      job.status=action==='stop'?'cancelled':'running';job.stage='idle';job.message=action==='stop'?'اجرا متوقف شد':'ادامهٔ استخراج';await jobSave(job);await runUpdate(job);
+      job.status=action==='stop'?'cancelled':'running';job.stage='idle';job.pausedAt='';job.reuseTab=action==='resume';job.message=action==='stop'?'اجرا متوقف شد':'ادامه از محل توقف پس از حل دستی';await jobSave(job);await badge(false);await runUpdate(job);
       await chrome.alarms.clear('capture-watch');if(action==='resume')await chrome.alarms.create('capture-step',{when:Date.now()+1000});return job;});
     if(['capture','contact'].includes(action)&&source&&message.payload?.source===source)return api(action==='capture'?'/api/extension/capture':'/api/extension/contact',message.payload);
     throw new Error('درخواست نامعتبر است.');

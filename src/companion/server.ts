@@ -7,7 +7,7 @@ import { cleanText, detailUrl, parseSource, searchPageContext, searchUrl, source
 import { normalizeIranianPhone } from '../server/extractor.js';
 import { campaignCities } from '../server/source-catalog.js';
 import { captureCurrentDetail, captureCurrentSearch, captureVisibleContact, requestSelectedContact } from './capture.js';
-import { assertSourceAvailable, cancelDetailJob, resumeDetailJob, startDetailJob } from './jobs.js';
+import { assertSourceAvailable, cancelDetailJob, resumeDetailJob, startDetailJob, restoreDetailJobs, detailJobProgress, focusDetailJob } from './jobs.js';
 import { listCaptureRuns, getCaptureRun, updateCaptureRun } from '../shared/capture-data.js';
 import { adsWorkbook } from '../server/excel-export.js';
 import { resetData, restoreData } from '../shared/data-reset.js';
@@ -15,6 +15,7 @@ import { deleteHistory, restoreHistory, historyCounts } from '../shared/history.
 
 const app = express();
 const port = Number(process.env.COMPANION_PORT ?? 4311);
+restoreDetailJobs();
 app.disable('x-powered-by');
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use((req, res, next) => {
@@ -48,12 +49,13 @@ app.post('/api/browser/:source/close', async (req, res) => {
 app.post('/api/browser/:source/login', async (req, res) => {
   res.json({ message: await startOfficialLogin(parseSource(req.params.source),String(req.body.phone??'')) });
 });
-app.get('/api/capture-runs',(_req,res)=>res.json(listCaptureRuns(db,'saved_ads')));
+app.get('/api/capture-runs',(_req,res)=>res.json(listCaptureRuns(db,'saved_ads').map(run=>{const {queue_state:_,...visible}=run as typeof run & {queue_state?:string};return {...visible,...detailJobProgress(run.id)};})));
 app.get('/api/capture-runs/history',(_req,res)=>res.json(historyCounts(db,'saved_ads_runs')));
 app.post('/api/capture-runs/history/delete',(req,res)=>res.json(deleteHistory(db,'saved_ads_runs',req.body??{})));
 app.post('/api/capture-runs/history/restore',(req,res)=>res.json(restoreHistory(db,'saved_ads_runs',req.body??{})));
 app.post('/api/browser/:source/extract',async(req,res)=>res.status(202).json(await startDetailJob(parseSource(req.params.source),Number(req.body.tabIndex),Number(req.body.limit??20))));
 app.post('/api/capture-runs/:id/resume',(req,res)=>res.json(resumeDetailJob(String(req.params.id))));
+app.post('/api/capture-runs/:id/focus',async(req,res)=>res.json(await focusDetailJob(String(req.params.id))));
 app.post('/api/capture-runs/:id/cancel',(req,res)=>{const id=String(req.params.id);let ok=cancelDetailJob(id);const run=getCaptureRun(db,'saved_ads',id);if(!ok&&run&&['running','paused'].includes(run.status)){updateCaptureRun(db,'saved_ads',id,{status:'cancelled',message:'اجرا متوقف شد'});ok=true;}res.json({ok});});
 app.post('/api/browser/:source/search', async (req, res) => {
   const source = parseSource(req.params.source);
