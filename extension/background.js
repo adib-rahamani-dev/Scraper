@@ -74,6 +74,14 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
     let source;try{const host=new URL(sender.url).hostname;source=Object.keys(hosts).find(s=>hosts[s].includes(host));}catch{}
     if(!own&&!source&&!panel)throw new Error('فرستنده نامعتبر است.');
     const action=message?.action;
+    if(action==='contact-permit'&&source&&sender.tab&&message.payload?.source===source)return serial(async()=>{
+      if(message.payload.confirmed!==true||!['direct-consent','public-business'].includes(message.payload.basis))throw new Error('تأیید و مبنای مجاز ثبت تماس لازم است.');
+      if(official(sender.url,source,'v')!==official(message.payload.url,source,'v'))throw new Error('برگه با آگهی انتخاب‌شده تطابق ندارد.');
+      const job=await jobGet();if(job?.source===source&&['running','paused'].includes(job.status))throw new Error('ابتدا صف این سایت را تمام یا متوقف کن.');
+      const key=`capture-next-${source}`;const next=Number((await chrome.storage.local.get(key))[key]||0);
+      if(next>Date.now())throw new Error(`برای رعایت ریت‌لیمیت، ${Math.ceil((next-Date.now())/1000)} ثانیه دیگر تلاش کن.`);
+      await chrome.storage.local.set({[key]:Date.now()+30000});return {allowed:true};
+    });
     if(panel&&!['status','configure','login','search','stop','resume','options'].includes(action))throw new Error('دستور پنل نامعتبر است.');
     if(action==='status'&&(own||panel)){const state=await chrome.storage.local.get(['captureJob','leadRadarToken','leadRadarEndpoint']);return {connected:Boolean(state.leadRadarToken),endpoint:state.leadRadarEndpoint,job:state.captureJob?{status:state.captureJob.status,processed:state.captureJob.processed,total:state.captureJob.total,message:state.captureJob.message}:null};}
 if(action==='configure'&&panel){if(typeof message.token!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(message.token))throw new Error('کلید اتصال نامعتبر است.');const endpoint=new URL(sender.url).hostname==='lead-radar-jade.vercel.app'?CLOUD_API:LOCAL_API;const job=await jobGet();if(job&&['running','paused'].includes(job.status))throw new Error('ابتدا اجرای فعال را متوقف کن.');await chrome.storage.local.set({leadRadarToken:message.token,leadRadarEndpoint:endpoint});return {connected:true};}

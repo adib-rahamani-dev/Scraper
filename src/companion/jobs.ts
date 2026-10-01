@@ -12,6 +12,7 @@ const starting=new Set<BrowserSource>();
 export function assertSourceAvailable(source:BrowserSource){
   if(starting.has(source)||[...jobs.values()].some(job=>job.source===source))throw new Error('این سایت اجرای فعال یا منتظر حل کپچا دارد؛ ابتدا ادامه بده یا متوقف کن.');
 }
+export async function runSingleContact<T>(source:BrowserSource,action:()=>Promise<T>){assertSourceAvailable(source);starting.add(source);try{return await action();}finally{starting.delete(source);}}
 export async function startDetailJob(source:BrowserSource,tabIndex:number,limit=20) {
   assertSourceAvailable(source);starting.add(source);
   try {

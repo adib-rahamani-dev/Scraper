@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import { detailUrl, homepages, type BrowserSource } from './policy.js';
-import { captureCurrentDetail, captureCurrentSearch, captureVisibleContact } from './capture.js';
+import { captureCurrentDetail, captureCurrentSearch, captureVisibleContact, requestSelectedContact } from './capture.js';
 
 const contexts = new Map<BrowserSource, BrowserContext>();
 const launches = new Map<BrowserSource, Promise<BrowserContext>>();
@@ -37,6 +37,7 @@ export async function openBrowser(source: BrowserSource): Promise<BrowserContext
     await context.exposeBinding('__leadRadarBridge', async ({ page }, command: unknown) => {
       if (command === 'detail') return captureCurrentDetail(source, page);
       if (command === 'search') return captureCurrentSearch(source, page);
+      if(command&&typeof command==='object'&&'kind' in command&&command.kind==='reveal-contact'&&'basis' in command&&'confirmed' in command&&command.confirmed===true){return requestSelectedContact(source,String(command.basis),page.url(),async()=>page);}
       if (command && typeof command === 'object' && 'kind' in command && command.kind === 'contact' && 'basis' in command && 'confirmed' in command && command.confirmed === true) {
         return captureVisibleContact(source, page, String(command.basis));
       }

@@ -115,7 +115,7 @@ for(const [action,handler] of [['reset',resetData],['restore',restoreData]] as c
 });
 app.use('/api/companion',async(request,response)=>{
   if(isVercel)return response.status(400).json({error:'در نسخهٔ آنلاین از افزونه استفاده کن.'});
-  if(!/^\/(?:state|capture-runs(?:\/history(?:\/(?:delete|restore))?|\/[a-z0-9-]+\/(?:cancel|resume))?|listings(?:\/\d+(?:\/enrich)?)?|export\.(?:csv|xlsx)|data\/(?:reset|restore)|browser\/(?:divar|sheypoor)\/(?:search|navigate|login|tabs|extract|capture-contact))$/.test(request.path))return response.status(404).json({error:'مسیر نامعتبر است.'});
+  if(!/^\/(?:state|capture-runs(?:\/history(?:\/(?:delete|restore))?|\/[a-z0-9-]+\/(?:cancel|resume))?|listings(?:\/\d+(?:\/(?:enrich|reveal-contact))?)?|export\.(?:csv|xlsx)|data\/(?:reset|restore)|browser\/(?:divar|sheypoor)\/(?:search|navigate|login|tabs|extract|capture-contact))$/.test(request.path))return response.status(404).json({error:'مسیر نامعتبر است.'});
   try{const target=new URL('http://127.0.0.1:4311/api'+request.url);const result=await fetch(target,{method:request.method,headers:{'content-type':'application/json'},body:['GET','HEAD'].includes(request.method)?undefined:JSON.stringify(request.body??{}),signal:AbortSignal.timeout(60000)});
     response.status(result.status);for(const name of ['content-type','content-disposition']){const value=result.headers.get(name);if(value)response.setHeader(name,value);}response.send(Buffer.from(await result.arrayBuffer()));
   }catch{response.status(503).json({error:'همراه مرورگر فعال نیست. npm run companion را اجرا کن.'});}

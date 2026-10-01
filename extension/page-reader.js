@@ -52,6 +52,31 @@
     }
     return [...phones];
   }
+  async function revealContact({confirmed,basis,expectedUrl,timeout=8000}={}) {
+    if(confirmed!==true||!['direct-consent','public-business'].includes(basis))throw new Error('تأیید و مبنای مجاز ثبت تماس همین آگهی لازم است.');
+    const original=url(location.href);
+    if(!source()||!original||url(expectedUrl)!==original)throw new Error('برگه با آگهی انتخاب‌شده تطابق ندارد.');
+    const assertReady=()=>{
+      if(url(location.href)!==original)throw new Error('آدرس آگهی تغییر کرد؛ ثبت تماس انجام نشد.');
+      if(blocked())throw new Error('کپچا یا محدودیت نمایش داده شد؛ آن را در سایت دستی حل کن و دوباره همین دکمه را بزن.');
+      if([...document.querySelectorAll('input[autocomplete="one-time-code"],input[name="otp"],input[name="username"],input[type="tel"]')].some(visible))throw new Error('ورود یا کد تأیید در سایت لازم است؛ شماره ثبت نشد.');
+    };
+    assertReady();
+    let numbers=contactPhones();
+    if(numbers.length>1)throw new Error('چند شماره نمایان است؛ برای جلوگیری از ثبت اشتباه چیزی ذخیره نشد.');
+    if(numbers.length===1)return numbers[0];
+    const candidates=[...document.querySelectorAll('button,[role="button"]')].filter(node=>visible(node)&&!node.disabled&&!node.closest('#lead-radar-extension,#lead-radar-floating-panel')&&!/^tel:/.test(node.getAttribute('href')||'')&&/^(اطلاعات\s*تماس|نمایش\s*شماره(?:\s*تماس)?|تماس\s*با\s*فروشنده|شماره\s*تماس|تماس)$/.test(clean(node.innerText||node.getAttribute('aria-label'),60)));
+    if(candidates.length!==1)throw new Error(candidates.length?'چند دکمهٔ تماس نمایان است؛ بخش تماس را خودت در سایت باز کن.':'دکمهٔ اطلاعات تماس شناخته نشد؛ آن را خودت در سایت باز کن.');
+    candidates[0].click(); // One explicitly selected ad, one click, no retry or bulk queue.
+    const deadline=Date.now()+Math.min(8000,Math.max(200,Number(timeout)||8000));
+    while(Date.now()<deadline){
+      assertReady();numbers=contactPhones();
+      if(numbers.length>1)throw new Error('چند شماره نمایان است؛ چیزی ذخیره نشد.');
+      if(numbers.length===1)return numbers[0];
+      await new Promise(resolve=>setTimeout(resolve,200));
+    }
+    throw new Error('شماره نمایان نشد؛ پیام سایت را بررسی کن. هیچ شماره‌ای ثبت نشد.');
+  }
   function detail(extra = {}) {
     if(blocked()) throw new Error('سایت درخواست بررسی یا محدودیت دسترسی نشان داده؛ اجرا متوقف شد.');
     const link=url(location.href); if(!link) throw new Error('این صفحه یک آگهی معتبر نیست.');
@@ -113,5 +138,5 @@
     }
     throw new Error(kind==='search'?(lastError||'نتایج جست‌وجو بارگذاری نشد؛ برگهٔ واقعی سایت را بررسی کن.'):'آگهی به‌طور کامل بارگذاری نشد یا حذف شده است؛ دادهٔ ناقص ثبت نشد.');
   }
-  globalThis.LeadRadarReader={search,detail,context,ready,blocked,visible,text,digits,redact,contactPhones};
+  globalThis.LeadRadarReader={search,detail,context,ready,blocked,visible,text,digits,redact,contactPhones,revealContact};
 })();

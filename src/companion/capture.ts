@@ -3,11 +3,30 @@ import { resolve } from 'node:path';
 import type { Page } from 'playwright-core';
 import { cleanText, detailUrl, type BrowserSource } from './policy.js';
 import { captureExtras } from '../shared/capture-data.js';
-import { saveAd, type AdInput } from './store.js';
+import { db, saveAd, type AdInput } from './store.js';
+import { runSingleContact } from './jobs.js';
+import { BROWSER_INTERVAL_MS } from '../shared/browser-rate-limit.js';
 
 const readerScript=readFileSync(resolve('extension/page-reader.js'),'utf8');
 type ReadAd={source:BrowserSource;title:string;url:string;topic:string;city:string;region:string;price:string;description:string;category:string;attributes:unknown[];images:string[];published_at:string};
-type Reader={ready:(kind:string,timeout?:number)=>Promise<ReadAd|{source:BrowserSource;context:{topic:string;city:string;region:string;searchUrl:string};items:ReadAd[]}>;detail:(context:Partial<AdInput>)=>ReadAd;contactPhones:()=>string[]};
+type Reader={ready:(kind:string,timeout?:number)=>Promise<ReadAd|{source:BrowserSource;context:{topic:string;city:string;region:string;searchUrl:string};items:ReadAd[]}>;detail:(context:Partial<AdInput>)=>ReadAd;contactPhones:()=>string[];revealContact:(options:{confirmed:boolean;basis:string;expectedUrl:string})=>Promise<string>};
+
+export async function revealSelectedContact(source:BrowserSource,page:Page,basis:string,expectedUrl:string){
+  if(!detailUrl(source,expectedUrl)||detailUrl(source,page.url())!==detailUrl(source,expectedUrl))throw new Error('برگه با آگهی انتخاب‌شده تطابق ندارد.');
+  await page.evaluate(readerScript);
+  await page.evaluate(async()=>(globalThis as unknown as {LeadRadarReader:Reader}).LeadRadarReader.ready('detail'));
+  await page.evaluate(options=>(globalThis as unknown as {LeadRadarReader:Reader}).LeadRadarReader.revealContact(options),{confirmed:true,basis,expectedUrl});
+  return captureVisibleContact(source,page,basis);
+}
+export async function requestSelectedContact(source:BrowserSource,basis:string,expectedUrl:string,resolvePage:()=>Promise<Page>){
+  if(!detailUrl(source,expectedUrl)||!['direct-consent','public-business'].includes(basis))throw new Error('آگهی یا مبنای مجاز ثبت نامعتبر است.');
+  return runSingleContact(source,async()=>{
+    const next=Number((db.prepare('SELECT next_at FROM browser_rate_limits WHERE source=?').get(source) as {next_at:number}|undefined)?.next_at??0);
+    if(next>Date.now())throw new Error(`برای رعایت ریت‌لیمیت، ${Math.ceil((next-Date.now())/1000)} ثانیه دیگر تلاش کن.`);
+    db.prepare('INSERT INTO browser_rate_limits(source,next_at) VALUES (?,?) ON CONFLICT(source) DO UPDATE SET next_at=excluded.next_at').run(source,Date.now()+BROWSER_INTERVAL_MS);
+    const page=await resolvePage();await page.bringToFront();return revealSelectedContact(source,page,basis,expectedUrl);
+  });
+}
 
 export async function readCurrentSearch(source:BrowserSource,page:Page) {
   // Official search pages may redirect to a category after DOMContentLoaded.

@@ -14,7 +14,7 @@
       button{width:100%;border:0;border-radius:9px;background:#4bd2aa;color:#08211e;padding:9px;font:bold 12px Tahoma,Arial,sans-serif;cursor:pointer;margin-bottom:6px}button:hover{filter:brightness(1.1)}button.secondary{background:#29435a;color:#eef7f9}button:disabled{opacity:.55;cursor:wait}
       .contact{border-top:1px solid #385264;padding-top:9px;margin-top:5px}.contact p{font-size:11px;color:#acc6d0;line-height:1.7;margin:0 0 8px}.contact select{width:100%;padding:7px;background:#1c3446;color:white;border:1px solid #4a6374;border-radius:7px;margin-bottom:7px}.confirm{display:flex;align-items:start;gap:6px;font-size:10px;line-height:1.6;margin-bottom:8px}.confirm input{margin:2px 0}
       .status{font-size:11px;color:#c3d4dc;line-height:1.6;min-height:17px}.status.error{color:#ff9eaa}.min{border:0;background:none;color:#a2c6ce;padding:0;margin:0;width:auto;font-size:18px}
-    </style><div class="panel"><div class="head"><span>◉ رادار لید</span><button class="min" title="جمع‌کردن">−</button></div><div class="content"><div class="mode"></div><button class="capture"></button><div class="contact" hidden><p>اول خودت «اطلاعات تماس» را در سایت باز کن؛ سپس فقط شمارهٔ نمایان را ثبت کن.</p><select class="basis"><option value="">مبنای مجاز ارتباط</option><option value="direct-consent">رضایت مستقیم</option><option value="public-business">شمارهٔ عمومی کسب‌وکار</option></select><label class="confirm"><input type="checkbox">مجاز بودن ثبت و ارتباط را تأیید می‌کنم.</label><button class="secondary capture-contact">ثبت شمارهٔ نمایان</button></div><button class="secondary dashboard">بازکردن پنل رادار</button><div class="status">ورود با شماره و کد را در خود سایت انجام بده.</div></div></div>`;
+    </style><div class="panel"><div class="head"><span>◉ رادار لید</span><button class="min" title="جمع‌کردن">−</button></div><div class="content"><div class="mode"></div><button class="capture"></button><div class="contact" hidden><p>با تأیید و کلیک خودت، تماس همین آگهی باز می‌شود؛ کپچا یا ورود را در سایت انجام بده.</p><select class="basis"><option value="">مبنای مجاز ارتباط</option><option value="direct-consent">رضایت مستقیم</option><option value="public-business">شمارهٔ عمومی کسب‌وکار</option></select><label class="confirm"><input type="checkbox">مجاز بودن ثبت و ارتباط را تأیید می‌کنم.</label><button class="secondary capture-contact">نمایش و ثبت تماس همین آگهی</button></div><button class="secondary dashboard">بازکردن پنل رادار</button><div class="status">ورود با شماره و کد را در خود سایت انجام بده.</div></div></div>`;
     document.body.append(host);
     const mode = shadow.querySelector('.mode');
     const capture = shadow.querySelector('.capture');
@@ -49,13 +49,14 @@
       finally { capture.disabled = false; }
     });
     shadow.querySelector('.capture-contact').addEventListener('click', async event => {
+      if(!event.isTrusted)return;
       const button = event.currentTarget;
       const basis = shadow.querySelector('.basis').value;
       const confirmed = shadow.querySelector('.confirm input').checked;
       if (!basis || !confirmed) { status.classList.add('error'); status.textContent = 'مبنای مجاز و تأیید ثبت را انتخاب کن.'; return; }
       button.disabled = true; status.classList.remove('error'); status.textContent = 'در حال بررسی بخش تماسِ نمایان…';
       try {
-        const result = await window.__leadRadarBridge({ kind: 'contact', basis, confirmed: true });
+        const result = await window.__leadRadarBridge({ kind: 'reveal-contact', basis, confirmed: true });
         status.textContent = `شمارهٔ نمایان ${result.phone} برای همین آگهی ثبت شد.`;
       } catch (error) { status.classList.add('error'); status.textContent = error.message || 'شماره ثبت نشد.'; }
       finally { button.disabled = false; }

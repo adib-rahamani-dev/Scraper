@@ -6,7 +6,7 @@ import { adsCsv, db, getAd, getAds, updateAd } from './store.js';
 import { cleanText, detailUrl, parseSource, searchPageContext, searchUrl, sources } from './policy.js';
 import { normalizeIranianPhone } from '../server/extractor.js';
 import { campaignCities } from '../server/source-catalog.js';
-import { captureCurrentDetail, captureCurrentSearch, captureVisibleContact } from './capture.js';
+import { captureCurrentDetail, captureCurrentSearch, captureVisibleContact, requestSelectedContact } from './capture.js';
 import { assertSourceAvailable, cancelDetailJob, resumeDetailJob, startDetailJob } from './jobs.js';
 import { listCaptureRuns, getCaptureRun, updateCaptureRun } from '../shared/capture-data.js';
 import { adsWorkbook } from '../server/excel-export.js';
@@ -124,6 +124,16 @@ app.post('/api/listings/:id/enrich', async (req, res) => {
   if (!ad) { res.status(404).json({ error: 'آگهی پیدا نشد.' }); return; }
   const page = await openDetail(ad.source, ad.url);
   res.json(await captureCurrentDetail(ad.source, page));
+});
+app.post('/api/listings/:id/reveal-contact',async(req,res)=>{
+  if(req.body.confirmed!==true||!['direct-consent','public-business'].includes(req.body.basis))throw new Error('تأیید و مبنای مجاز ثبت تماس لازم است.');
+  const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw new Error('شناسه نامعتبر است.');
+  const ad=getAd(id);if(!ad)return res.status(404).json({error:'آگهی پیدا نشد.'});
+  const result=await requestSelectedContact(ad.source,String(req.body.basis),ad.url,async()=>{
+    const existing=(await tabs(ad.source)).find(tab=>detailUrl(ad.source,tab.url)===ad.url);
+    return existing?selectedPage(ad.source,existing.index):await openDetail(ad.source,ad.url);
+  });
+  return res.json(result);
 });
 app.patch('/api/listings/:id', (req, res) => {
   const id = Number(req.params.id);

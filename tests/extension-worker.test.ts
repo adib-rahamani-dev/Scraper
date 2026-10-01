@@ -18,6 +18,16 @@ it('enforces a persisted cooldown after the service worker restarts',async()=>{
   expect(w.chrome.tabs.update).not.toHaveBeenCalled();expect(w.chrome.tabs.create).not.toHaveBeenCalled();
   expect(w.alarms['capture-step']).toEqual({when:deadline});expect(w.local.captureJob.stage).toBe('idle');
 });
+it('allows one selected-ad contact permit only with confirmation and retains its cooldown',async()=>{
+  const w=worker();const sender={id:'test',url:'https://divar.ir/v/item/1',tab:{id:5}};
+  const message={action:'contact-permit',payload:{source:'divar',url:sender.url,basis:'public-business',confirmed:true}};
+  expect((await w.send({...message,payload:{...message.payload,confirmed:false}},sender)).error).toBeTruthy();
+  expect((await w.send({...message,payload:{...message.payload,url:'https://divar.ir/v/other/2'}},sender)).error).toBeTruthy();
+  expect((await w.send(message,sender)).result.allowed).toBe(true);
+  expect((await w.send(message,sender)).error).toContain('ریت‌لیمیت');
+  expect(w.requests).toHaveLength(0);expect(w.chrome.tabs.update).not.toHaveBeenCalled();
+  expect((await w.send(message,{id:'test',url:'https://lead-radar-jade.vercel.app/'})).error).toBeTruthy();
+});
 it('rejects a foreign sender and keeps login phones out of persistent storage and backend',async()=>{
   const w=worker();expect((await w.send({action:'login',phone:'09123456789',source:'divar'},{url:'https://evil.example',id:'test'})).error).toBeTruthy();
   await w.send({action:'login',phone:'09123456789',source:'divar'});expect(JSON.stringify(w.local)).not.toContain('09123456789');expect(w.requests).toHaveLength(0);expect(w.session['login-12'].phone).toBe('09123456789');
