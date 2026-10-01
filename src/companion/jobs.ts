@@ -4,6 +4,7 @@ import { captureCurrentDetail, readCurrentSearch } from './capture.js';
 import { db } from './store.js';
 import { createCaptureRun, getCaptureRun, linkCaptureRun, updateCaptureRun } from '../shared/capture-data.js';
 import type { BrowserSource } from './policy.js';
+import {MAX_BROWSER_ADS,waitForBrowserSlot} from '../shared/browser-rate-limit.js';
 
 type Job={id:string;source:BrowserSource;items:Array<{url:string}>;context:{topic:string;city:string;region:string};index:number;processed:number;failed:number;running:boolean;cancelled:boolean};
 const jobs=new Map<string,Job>();
@@ -15,7 +16,7 @@ export async function startDetailJob(source:BrowserSource,tabIndex:number,limit=
   assertSourceAvailable(source);starting.add(source);
   try {
   const search=await readCurrentSearch(source,selectedPage(source,tabIndex));
-  const items=search.items.slice(0,Math.max(1,Math.min(40,limit)));
+  const items=search.items.slice(0,Math.max(1,Math.min(MAX_BROWSER_ADS,Number(limit)||MAX_BROWSER_ADS)));
   const run=createCaptureRun(db,'saved_ads',source,{...search.context,total:items.length});
   const job:Job={id:run.id,source,items,context:search.context,index:0,processed:0,failed:0,running:true,cancelled:false};
   jobs.set(run.id,job);dispatch(job);
@@ -30,6 +31,11 @@ async function collect(job:Job) {
     const item=items[job.index]!;
     if(job.cancelled)break;
     try {
+      const permitted=await waitForBrowserSlot(source,
+        site=>Number((db.prepare('SELECT next_at FROM browser_rate_limits WHERE source=?').get(site) as {next_at:number}|undefined)?.next_at??0),
+        (site,next)=>{db.prepare('INSERT INTO browser_rate_limits(source,next_at) VALUES (?,?) ON CONFLICT(source) DO UPDATE SET next_at=excluded.next_at').run(site,next);},
+        ()=>job.cancelled,pause);
+      if(!permitted)break;
       await page.goto(item.url,{waitUntil:'domcontentloaded',timeout:30_000});
       const capture=await captureCurrentDetail(source,page,context);
       if(job.cancelled)break;
@@ -40,7 +46,6 @@ async function collect(job:Job) {
     }
     if(job.cancelled)break;
     updateCaptureRun(db,'saved_ads',id,{processed:job.processed,failed:job.failed,message:`${job.processed} آگهی بررسی‌شده، ${job.failed} ناموفق؛ خروجی فقط شماره‌های ثبت‌شده`});
-    if(job.index+1<items.length)await pause(5000);
   }
   const status=job.cancelled?'cancelled':job.failed?'partial':'completed';jobs.delete(id);
   updateCaptureRun(db,'saved_ads',id,{status,processed:job.processed,failed:job.failed,message:status==='cancelled'?'استخراج متوقف شد':`پایان بررسی: ${job.processed} آگهی، ${job.failed} ناموفق؛ خروجی فقط شماره‌های ثبت‌شده`});

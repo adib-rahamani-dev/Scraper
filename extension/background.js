@@ -24,7 +24,7 @@ async function pause(job,error) {
 async function startRun(source,search,limit) {
   const previous=await jobGet();if(previous && ['running','paused'].includes(previous.status))throw new Error('اجرای قبلی را تمام یا متوقف کن.');
   const searchUrl=official(search.context.searchUrl,source,'s');
-  const urls=[...new Set(search.items.map(i=>official(i.url,source,'v')))].slice(0,Math.max(1,Math.min(40,Number(limit)||20)));
+  const urls=[...new Set(search.items.map(i=>official(i.url,source,'v')))].slice(0,Math.max(1,Math.min(20,Number(limit)||20)));
   if(!urls.length)throw new Error('نتیجه‌ای بارگذاری نشده است.');
   const run=await api('/api/extension/runs',{source,...search.context,searchUrl,total:urls.length});
   const job={...run,context:{...search.context,searchUrl},urls,index:0,stage:'idle',tabId:null,api:(await chrome.storage.local.get('leadRadarEndpoint')).leadRadarEndpoint||CLOUD_API};
@@ -34,6 +34,10 @@ async function next() {
   const job=await jobGet();if(!job||job.status!=='running'||job.stage!=='idle')return;
   if(job.index>=job.urls.length){job.status=job.failed?'partial':'completed';job.message=`پایان: ${job.processed} آگهی کامل، ${job.failed} ناموفق`;await jobSave(job);await runUpdate(job);return;}
   if(((await chrome.storage.local.get('leadRadarEndpoint')).leadRadarEndpoint||CLOUD_API)!==job.api){await pause(job,new Error('مقصد اتصال تغییر کرده؛ اجرا متوقف شد.'));return;}
+  const paceKey=`capture-next-${job.source}`;
+  const nextAt=Number((await chrome.storage.local.get(paceKey))[paceKey]||0);
+  if(nextAt>Date.now()){job.message='انتظار برای فاصلهٔ ثابت ۳۰ ثانیه‌ای';await jobSave(job);await chrome.alarms.create('capture-step',{when:nextAt});return;}
+  await chrome.storage.local.set({[paceKey]:Date.now()+30000});
   job.stage='loading';job.message=`بازکردن آگهی ${job.index+1} از ${job.total}`;await jobSave(job);
   await chrome.alarms.create('capture-watch',{when:Date.now()+45000});
   try {
@@ -51,7 +55,7 @@ async function collect(tabId,url) {
     if(result?.error)throw new Error(result.error);if(!result?.ad||official(result.ad.url,job.source,'v')!==actual)throw new Error('اطلاعات برگه با آگهی انتخابی تطابق ندارد.');
     await api('/api/extension/capture',{source:job.source,mode:'detail',runId:job.id,items:[result.ad]});
     job.processed++;job.index++;job.stage='idle';job.message=`${job.processed} آگهی کامل از ${job.total}`;
-    await jobSave(job);await runUpdate(job);await chrome.alarms.clear('capture-watch');await chrome.alarms.create('capture-step',{when:Date.now()+5000});
+    await jobSave(job);await runUpdate(job);await chrome.alarms.clear('capture-watch');await chrome.alarms.create('capture-step',{when:Date.now()+1000});
   }catch(error){await pause(job,error);}
 }
 async function dispatchLogin(tabId) {

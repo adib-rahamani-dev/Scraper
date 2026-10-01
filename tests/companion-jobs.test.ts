@@ -5,6 +5,7 @@ const fixture=vi.hoisted(()=>{
   return {runs,goto:vi.fn(async(_url:string,_options?:unknown)=>{}),bringToFront:vi.fn(async()=>{}),capture:vi.fn(),search:vi.fn(),link:vi.fn()};
 });
 vi.mock('../src/companion/store.js',()=>({db:{}}));
+vi.mock('../src/shared/browser-rate-limit.js',()=>({MAX_BROWSER_ADS:20,waitForBrowserSlot:async()=>true}));
 vi.mock('../src/companion/browser.js',()=>({selectedPage:()=>({}),openBrowser:async()=>({newPage:async()=>({goto:fixture.goto,bringToFront:fixture.bringToFront})})}));
 vi.mock('../src/companion/capture.js',()=>({captureCurrentDetail:fixture.capture,readCurrentSearch:fixture.search}));
 vi.mock('../src/shared/capture-data.js',()=>({

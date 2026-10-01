@@ -7,6 +7,7 @@ import { captureExtras, captureRunAds, initializeCaptureData, type CaptureExtras
 mkdirSync(resolve('data'), { recursive: true });
 export const db = new DatabaseSync(resolve('data/companion.db'));
 db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
+db.exec('CREATE TABLE IF NOT EXISTS browser_rate_limits (source TEXT PRIMARY KEY, next_at INTEGER NOT NULL)');
 db.exec(`
   CREATE TABLE IF NOT EXISTS saved_ads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

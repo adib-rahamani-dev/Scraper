@@ -11,6 +11,13 @@ function worker(initial:Record<string,unknown>={}){
   const settle=async()=>{await new Promise(r=>setTimeout(r,25));};
   return {local,session,requests,chrome,send,listeners,settle,alarms};
 }
+it('enforces a persisted cooldown after the service worker restarts',async()=>{
+  const deadline=Date.now()+30000;
+  const w=worker({'capture-next-divar':deadline,captureJob:{id:'run-1',source:'divar',status:'running',stage:'idle',urls:['https://divar.ir/v/item/1'],index:0,processed:0,failed:0,total:1,tabId:null,api:'https://lead-radar-jade.vercel.app'}});
+  w.listeners.alarm!({name:'capture-step'});await w.settle();
+  expect(w.chrome.tabs.update).not.toHaveBeenCalled();expect(w.chrome.tabs.create).not.toHaveBeenCalled();
+  expect(w.alarms['capture-step']).toEqual({when:deadline});expect(w.local.captureJob.stage).toBe('idle');
+});
 it('rejects a foreign sender and keeps login phones out of persistent storage and backend',async()=>{
   const w=worker();expect((await w.send({action:'login',phone:'09123456789',source:'divar'},{url:'https://evil.example',id:'test'})).error).toBeTruthy();
   await w.send({action:'login',phone:'09123456789',source:'divar'});expect(JSON.stringify(w.local)).not.toContain('09123456789');expect(w.requests).toHaveLength(0);expect(w.session['login-12'].phone).toBe('09123456789');
