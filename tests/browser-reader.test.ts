@@ -18,6 +18,10 @@ it('reads Sheypoor dynamic attributes and visible description only, with the cit
 it('deduplicates loaded search cards and ignores unrelated links',async()=>{
   const page=await fixture('https://divar.ir/s/qazvin?q=mobile',`<a href="/v/mobile/1"><h2>موبایل</h2><div>۱۲,۰۰۰,۰۰۰ تومان</div></a><a href="/v/mobile/1"><h2>موبایل</h2></a><a href="https://evil.example/v/x"><h2>خارجی</h2></a>`);await page.evaluate(reader);const result=await page.evaluate(()=> (globalThis as any).LeadRadarReader.search());expect(result.items).toHaveLength(1);expect(result.context.topic).toBe('mobile');await page.close();
 });
+it('reads a manually revealed Divar phone from the labeled row and ignores description numbers',async()=>{
+  const page=await fixture('https://divar.ir/v/fixture-contact/2',`<main><h1>زین</h1><div><span>شماره موبایل</span><button>۰۹۱۲۳۴۵۶۷۸۹</button></div><section><h2>توضیحات</h2><p>عدد نامرتبط ۰۹۹۹۹۹۹۹۹۹۹</p></section><div hidden><span>شماره تماس</span><b>۰۹۱۱۱۱۱۱۱۱۱</b></div></main>`);
+  await page.evaluate(reader);expect(await page.evaluate(()=> (globalThis as any).LeadRadarReader.contactPhones())).toEqual(['09123456789']);await page.close();
+});
 it('fills the official phone field, submits once, and leaves the OTP entry to the user',async()=>{
   const page=await fixture('https://www.sheypoor.com/session',`<form><input name="username"><button type="submit">ورود یا ثبت نام در شیپور</button></form>`);
   await page.evaluate(()=>{const doc=(globalThis as any).document;(globalThis as any).submits=0;doc.querySelector('form').onsubmit=(e:{preventDefault:()=>void})=>{e.preventDefault();(globalThis as any).submits++;doc.querySelector('form').innerHTML='<input autocomplete="one-time-code" name="otp"><p>کد تأیید را وارد کنید</p>';};});

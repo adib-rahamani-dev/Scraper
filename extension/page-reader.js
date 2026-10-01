@@ -34,6 +34,24 @@
     const body=document.body?.innerText || '';
     return /کپچا|تعداد درخواست.*زیاد|دسترسی.*محدود|access denied|verify you are human|too many requests/i.test(body) || Boolean(document.querySelector('iframe[src*="captcha"],iframe[src*="challenge"]'));
   }
+  function contactPhones() {
+    if(!url(location.href)) throw new Error('ابتدا صفحهٔ یک آگهی را باز کن.');
+    const parts=[];const add=node=>{if(!visible(node))return;const value=clean(node.innerText||node.textContent,3000);if(value)parts.push(value);};
+    for(const node of document.querySelectorAll('[role="dialog"],.post-actions,[class*="contact-info"],[class*="contact-modal"],[class*="post-contact"],[data-testid*="contact"]'))add(node);
+    for(const link of document.querySelectorAll('a[href^="tel:"]'))if(visible(link))parts.push(link.getAttribute('href')||'');
+    // Divar can render the revealed number as a normal row beside the label "شماره موبایل".
+    for(const label of document.querySelectorAll('main *')) {
+      if(!visible(label)||!/^(شماره موبایل|شماره تماس|تلفن تماس)$/.test(clean(label.textContent,80)))continue;
+      let row=label.parentElement;
+      for(let level=0;row&&level<3;level++,row=row.parentElement){const value=clean(row.innerText,500);if(value)parts.push(value);if(/(?:\+98|0098|0|۰)[9۹]/.test(value))break;}
+    }
+    const phones=new Set();
+    for(const part of parts)for(const match of digits(part).matchAll(/(?:\+98|0098|0)?9\d(?:[\s\-().]*\d){8}/g)){
+      const num=match[0].replace(/\D/g,'');const phone=num.startsWith('0098')?'0'+num.slice(4):num.startsWith('98')?'0'+num.slice(2):num.startsWith('9')?'0'+num:num;
+      if(/^09\d{9}$/.test(phone))phones.add(phone);
+    }
+    return [...phones];
+  }
   function detail(extra = {}) {
     if(blocked()) throw new Error('سایت درخواست بررسی یا محدودیت دسترسی نشان داده؛ اجرا متوقف شد.');
     const link=url(location.href); if(!link) throw new Error('این صفحه یک آگهی معتبر نیست.');
@@ -95,5 +113,5 @@
     }
     throw new Error(kind==='search'?(lastError||'نتایج جست‌وجو بارگذاری نشد؛ برگهٔ واقعی سایت را بررسی کن.'):'آگهی به‌طور کامل بارگذاری نشد یا حذف شده است؛ دادهٔ ناقص ثبت نشد.');
   }
-  globalThis.LeadRadarReader={search,detail,context,ready,blocked,visible,text,digits,redact};
+  globalThis.LeadRadarReader={search,detail,context,ready,blocked,visible,text,digits,redact,contactPhones};
 })();

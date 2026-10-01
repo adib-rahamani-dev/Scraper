@@ -15,14 +15,8 @@
     execute().then(respond).catch(error=>respond({error:error.message}));return true;
   });
   function visiblePhone() {
-    const containers=[...document.querySelectorAll('[role="dialog"],.post-actions,[class*="contact-info"],[class*="contact-modal"],[class*="post-contact"]')].filter(reader.visible).slice(0,30);
-    const parts=containers.map(n=>reader.text(n,3000));
-    for(const link of document.querySelectorAll('a[href^="tel:"]'))if(reader.visible(link)&&containers.some(n=>n.contains(link)))parts.push(link.getAttribute('href'));
-    const phones=new Set();for(const part of parts)for(const match of reader.digits(part).matchAll(/(?:\+98|0098|0)?9\d(?:[\s\-().]*\d){8}/g)){
-      const num=match[0].replace(/\D/g,'');const phone=num.startsWith('0098')?'0'+num.slice(4):num.startsWith('98')?'0'+num.slice(2):num.startsWith('9')?'0'+num:num;
-      if(/^09\d{9}$/.test(phone))phones.add(phone);
-    }
-    if(phones.size!==1)throw new Error(phones.size?'چند شماره نمایان است؛ برای جلوگیری از ثبت اشتباه چیزی ثبت نشد.':'ابتدا خودت بخش اطلاعات تماسِ همین آگهی را در سایت باز کن.');return [...phones][0];
+    const phones=reader.contactPhones();
+    if(phones.length!==1)throw new Error(phones.length?'چند شماره نمایان است؛ برای جلوگیری از ثبت اشتباه چیزی ثبت نشد.':'ابتدا خودت بخش اطلاعات تماسِ همین آگهی را در سایت باز کن.');return phones[0];
   }
   const host=document.createElement('div');host.id='lead-radar-extension';host.style.cssText='position:fixed!important;left:18px!important;bottom:18px!important;z-index:2147483647!important;direction:rtl!important';
   const root=host.attachShadow({mode:'closed'});

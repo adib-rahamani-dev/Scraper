@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Page } from 'playwright-core';
-import { cleanText, contactCandidates, detailUrl, type BrowserSource } from './policy.js';
+import { cleanText, detailUrl, type BrowserSource } from './policy.js';
 import { captureExtras } from '../shared/capture-data.js';
 import { saveAd, type AdInput } from './store.js';
 
 const readerScript=readFileSync(resolve('extension/page-reader.js'),'utf8');
 type ReadAd={source:BrowserSource;title:string;url:string;topic:string;city:string;region:string;price:string;description:string;category:string;attributes:unknown[];images:string[];published_at:string};
-type Reader={ready:(kind:string,timeout?:number)=>Promise<ReadAd|{source:BrowserSource;context:{topic:string;city:string;region:string;searchUrl:string};items:ReadAd[]}>;detail:(context:Partial<AdInput>)=>ReadAd};
+type Reader={ready:(kind:string,timeout?:number)=>Promise<ReadAd|{source:BrowserSource;context:{topic:string;city:string;region:string;searchUrl:string};items:ReadAd[]}>;detail:(context:Partial<AdInput>)=>ReadAd;contactPhones:()=>string[]};
 
 export async function readCurrentSearch(source:BrowserSource,page:Page) {
   await page.evaluate(readerScript);
@@ -31,13 +31,8 @@ export async function captureCurrentSearch(source:BrowserSource,page:Page) {
 export async function captureVisibleContact(source:BrowserSource,page:Page,basis:string) {
   if(!detailUrl(source,page.url()))throw new Error('ابتدا صفحهٔ یک آگهی را باز کن.');
   if(basis!=='direct-consent'&&basis!=='public-business')throw new Error('مبنای مجاز ارتباط را انتخاب کن.');
-  const parts:string[]=[];
-  for(const container of (await page.locator('[role="dialog"],.post-actions,[class*="contact-info"],[class*="contact-modal"],[class*="post-contact"]').all()).slice(0,30)) {
-    if(!await container.isVisible().catch(()=>false))continue;
-    const text=await container.innerText({timeout:700}).catch(()=>'');if(text.length<=3000)parts.push(text);
-  }
-  for(const link of (await page.locator('a[href^="tel:"]').all()).slice(0,20))if(await link.isVisible().catch(()=>false))parts.push(await link.getAttribute('href')||'');
-  const candidates=contactCandidates(parts);
+  await page.evaluate(readerScript);
+  const candidates=await page.evaluate(()=>(globalThis as unknown as {LeadRadarReader:Reader}).LeadRadarReader.contactPhones());
   if(candidates.length!==1)throw new Error(candidates.length?'چند شماره نمایان است؛ شمارهٔ درست را دستی ثبت کن.':'شماره‌ای در بخش تماسِ نمایان پیدا نشد. ابتدا اطلاعات تماس را خودت باز کن.');
   const metadata=await captureCurrentDetail(source,page);
   const ad=saveAd({...metadata.ad,phone:candidates[0]!,contact_basis:basis,contact_source:'visible'}).ad;
