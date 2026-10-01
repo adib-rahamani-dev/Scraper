@@ -8,8 +8,9 @@ import { normalizeIranianPhone } from '../server/extractor.js';
 import { campaignCities } from '../server/source-catalog.js';
 import { captureCurrentDetail, captureCurrentSearch, captureVisibleContact } from './capture.js';
 import { cancelDetailJob, startDetailJob } from './jobs.js';
-import { listCaptureRuns } from '../shared/capture-data.js';
+import { listCaptureRuns, getCaptureRun, updateCaptureRun } from '../shared/capture-data.js';
 import { adsWorkbook } from '../server/excel-export.js';
+import { resetData, restoreData } from '../shared/data-reset.js';
 import { deleteHistory, restoreHistory, historyCounts } from '../shared/history.js';
 
 const app = express();
@@ -33,6 +34,8 @@ app.get('/api/state', (_req, res) => {
   const count = (db.prepare('SELECT COUNT(*) AS n FROM saved_ads').get() as { n: number }).n;
   res.json({ sources: sources.map(source => ({ source, open: browserOpen(source) })), count, cities: campaignCities });
 });
+app.post('/api/data/reset',(req,res)=>res.json(resetData(db,'companion',req.body??{})));
+app.post('/api/data/restore',(req,res)=>res.json(restoreData(db,'companion',req.body??{})));
 app.post('/api/browser/:source/open', async (req, res) => {
   const source = parseSource(req.params.source);
   await openBrowser(source);
@@ -50,7 +53,7 @@ app.get('/api/capture-runs/history',(_req,res)=>res.json(historyCounts(db,'saved
 app.post('/api/capture-runs/history/delete',(req,res)=>res.json(deleteHistory(db,'saved_ads_runs',req.body??{})));
 app.post('/api/capture-runs/history/restore',(req,res)=>res.json(restoreHistory(db,'saved_ads_runs',req.body??{})));
 app.post('/api/browser/:source/extract',async(req,res)=>res.status(202).json(await startDetailJob(parseSource(req.params.source),Number(req.body.tabIndex),Number(req.body.limit??20))));
-app.post('/api/capture-runs/:id/cancel',(req,res)=>res.json({ok:cancelDetailJob(String(req.params.id))}));
+app.post('/api/capture-runs/:id/cancel',(req,res)=>{const id=String(req.params.id);let ok=cancelDetailJob(id);const run=getCaptureRun(db,'saved_ads',id);if(!ok&&run&&['running','paused'].includes(run.status)){updateCaptureRun(db,'saved_ads',id,{status:'cancelled',message:'اجرا متوقف شد'});ok=true;}res.json({ok});});
 app.post('/api/browser/:source/search', async (req, res) => {
   const source = parseSource(req.params.source);
   const url = searchUrl(source, req.body.topic, req.body.city);
@@ -142,6 +145,8 @@ app.get('/api/export.json', (_req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="saved-ads.json"');
   res.json({ format: 'lead-radar-local-ads-v1', items: getAds() });
 });
+app.get('/',async(_req,res,next)=>{try{const health=await fetch('http://127.0.0.1:4300/api/health',{signal:AbortSignal.timeout(1500)});if(health.ok)return res.redirect('http://127.0.0.1:4300/');}catch{}next();});
+app.get('/legacy',(_req,res)=>res.sendFile(resolve('src/companion/ui/index.html')));
 app.use(express.static(resolve('src/companion/ui')));
 app.get('/{*path}', (_req, res) => res.sendFile(resolve('src/companion/ui/index.html')));
 const errors: ErrorRequestHandler = (error: unknown, _req, res, _next) => {

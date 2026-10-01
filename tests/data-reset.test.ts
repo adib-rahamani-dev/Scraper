@@ -1,0 +1,11 @@
+import { DatabaseSync } from 'node:sqlite';
+import { expect,it } from 'vitest';
+import { resetData,restoreData } from '../src/shared/data-reset.js';
+function fixture(){const db=new DatabaseSync(':memory:');db.exec(`PRAGMA foreign_keys=ON;
+  CREATE TABLE saved_ads(id INTEGER PRIMARY KEY,title TEXT,phone TEXT);
+  CREATE TABLE saved_ads_runs(id TEXT PRIMARY KEY,status TEXT);
+  CREATE TABLE saved_ads_members(run_id TEXT REFERENCES saved_ads_runs(id),ad_id INTEGER REFERENCES saved_ads(id));
+  INSERT INTO saved_ads VALUES(1,'fixture','09123456789'); INSERT INTO saved_ads_runs VALUES('r','completed');INSERT INTO saved_ads_members VALUES('r',1);`);return db;}
+it('requires the typed phrase and restores contacts and membership atomically',()=>{const db=fixture();expect(()=>resetData(db,'companion',{confirm:true})).toThrow();expect(resetData(db,'companion',{confirm:true,confirmText:'من تایید میکنم'}).changed).toBe(3);expect(db.prepare('SELECT count(*) n FROM saved_ads').get()).toMatchObject({n:0});expect(restoreData(db,'companion',{confirm:true}).changed).toBe(3);expect(db.prepare('SELECT phone FROM saved_ads').get()).toMatchObject({phone:'09123456789'});expect(db.prepare('SELECT * FROM saved_ads_members').get()).toMatchObject({run_id:'r',ad_id:1});db.close();});
+it('does not clear a running or paused bank',()=>{const db=fixture();db.exec("UPDATE saved_ads_runs SET status='paused'");expect(()=>resetData(db,'companion',{confirm:true,confirmText:'من تایید میکنم'})).toThrow('فعال');expect(db.prepare('SELECT count(*) n FROM saved_ads').get()).toMatchObject({n:1});db.close();});
+it('rolls back the entire delete when a foreign-key dependency refuses it',()=>{const db=fixture();db.exec('CREATE TABLE extra(ad INTEGER REFERENCES saved_ads(id));INSERT INTO extra VALUES(1)');expect(()=>resetData(db,'companion',{confirm:true,confirmText:'من تایید میکنم'})).toThrow();expect(db.prepare('SELECT count(*) n FROM saved_ads_members').get()).toMatchObject({n:1});expect(db.prepare('SELECT count(*) n FROM data_trash').get()).toMatchObject({n:0});db.close();});

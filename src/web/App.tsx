@@ -9,8 +9,9 @@ import {
 import type { BuiltInSourceId, Campaign, DashboardData, Lead, Project, Run, SourceCatalogItem, SourceId, TopicCampaignResult } from '../shared/types';
 import CloudCaptureView from './CloudCaptureView';
 import HistoryControls from './HistoryControls';
+import RadarWorkspace from './RadarWorkspace';
 
-type View = 'dashboard' | 'projects' | 'leads' | 'captured' | 'runs' | 'exports' | 'settings';
+type View = 'dashboard' | 'analytics' | 'projects' | 'leads' | 'captured' | 'runs' | 'exports' | 'settings';
 class AuthRequiredError extends Error {}
 
 const sourceLabel: Record<string, string> = {
@@ -40,10 +41,11 @@ function faDate(value: string | null): string {
 }
 
 const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }> = [
-  { id: 'dashboard', label: 'داشبورد', icon: LayoutDashboard },
+  { id: 'dashboard', label: 'رادار یکپارچه', icon: Radar },
+  { id: 'analytics', label: 'آمار و نمای کلی', icon: LayoutDashboard },
   { id: 'projects', label: 'پویش‌های انبوه', icon: Target },
   { id: 'leads', label: 'بانک سرنخ‌ها', icon: Users },
-  { id: 'captured', label: 'آگهی‌های مرورگر', icon: Globe2 },
+  { id: 'captured', label: 'بانک ابری افزونه', icon: Globe2 },
   { id: 'runs', label: 'تاریخچه اجرا', icon: Activity },
   { id: 'exports', label: 'خروجی و گزارش', icon: FileSpreadsheet },
   { id: 'settings', label: 'تنظیمات', icon: Settings },
@@ -120,7 +122,7 @@ export default function App() {
     } catch (error) { setToast({ kind: 'error', text: error instanceof Error ? error.message : 'خطا در ذخیره' }); }
   };
 
-  const launchCampaign = async (topic: string, city = 'کل ایران', selectedSources?: BuiltInSourceId[]) => {
+  const launchCampaign = async (topic: string, city = 'کل ایران', selectedSources?: BuiltInSourceId[],navigate=true) => {
     try {
       const result = await api<TopicCampaignResult>('/api/campaigns/topic', {
         method: 'POST',
@@ -130,7 +132,7 @@ export default function App() {
       await loadAll(true);
       setSelectedCampaignId(result.campaign.id);
       setToast({ kind: 'ok', text: `پویش «${result.topic}» ثبت شد؛ فقط منابع دارای داده عمومی خودکار بررسی می‌شوند.` });
-      setView('projects');
+      if(navigate)setView('projects');
     } catch (error) {
       setToast({ kind: 'error', text: error instanceof Error ? error.message : 'ساخت پویش ممکن نشد.' });
       throw error;
@@ -211,7 +213,8 @@ export default function App() {
 
         <section className="workspace">
           {loading && !dashboard ? <LoadingState /> : <>
-            {view === 'dashboard' && <Dashboard data={dashboard!} projects={projects} campaigns={campaigns} sources={sources} onLaunch={launchCampaign} onAdvanced={() => setModalOpen(true)} onNavigate={setView} />}
+            {view === 'dashboard' && <RadarWorkspace publicLeads={filteredLeads} campaignId={selectedCampaignId} onPublicSearch={(topic,city)=>launchCampaign(topic,city,['iran-tejarat','niyazban'],false)} onChanged={()=>void loadAll(true)}/>}
+            {view === 'analytics' && <Dashboard data={dashboard!} projects={projects} campaigns={campaigns} sources={sources} onLaunch={launchCampaign} onAdvanced={() => setModalOpen(true)} onNavigate={setView} />}
             {view === 'projects' && <CampaignsView campaigns={campaigns} projects={projects} onNew={() => setTopicModalOpen(true)} onAdvanced={() => setModalOpen(true)} onRetry={retryCampaign} onResults={(campaign) => { setSelectedCampaignId(campaign.id); setView('leads'); }} />}
             {view === 'leads' && <LeadsView leads={filteredLeads} projects={projects} campaigns={campaigns} selectedCampaignId={selectedCampaignId} onCampaignChange={setSelectedCampaignId} onUpdate={updateLead} />}
             {view === 'captured' && <CloudCaptureView />}

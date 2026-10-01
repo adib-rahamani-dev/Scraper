@@ -43,7 +43,7 @@
     for(const label of document.querySelectorAll('main *')) {
       if(!visible(label)||!/^(شماره موبایل|شماره تماس|تلفن تماس)$/.test(clean(label.textContent,80)))continue;
       let row=label.parentElement;
-      for(let level=0;row&&level<3;level++,row=row.parentElement){const value=clean(row.innerText,500);if(value)parts.push(value);if(/(?:\+98|0098|0|۰)[9۹]/.test(value))break;}
+      for(let level=0;row&&level<3;level++,row=row.parentElement){if(row.matches('main,body')||row.querySelector('h1,h2'))break;const value=clean(row.innerText,500);if(value)parts.push(value);if(/(?:\+98|0098|0|۰)[9۹]/.test(value))break;}
     }
     const phones=new Set();
     for(const part of parts)for(const match of digits(part).matchAll(/(?:\+98|0098|0)?9\d(?:[\s\-().]*\d){8}/g)){

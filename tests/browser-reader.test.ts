@@ -22,6 +22,7 @@ it('reads a manually revealed Divar phone from the labeled row and ignores descr
   const page=await fixture('https://divar.ir/v/fixture-contact/2',`<main><h1>زین</h1><div><span>شماره موبایل</span><button>۰۹۱۲۳۴۵۶۷۸۹</button></div><section><h2>توضیحات</h2><p>عدد نامرتبط ۰۹۹۹۹۹۹۹۹۹۹</p></section><div hidden><span>شماره تماس</span><b>۰۹۱۱۱۱۱۱۱۱۱</b></div></main>`);
   await page.evaluate(reader);expect(await page.evaluate(()=> (globalThis as any).LeadRadarReader.contactPhones())).toEqual(['09123456789']);await page.close();
 });
+it('does not climb from a closed contact row into the ad description',async()=>{const page=await fixture('https://divar.ir/v/fixture-contact/3','<main><h1>آگهی</h1><div><div><span>شماره موبایل</span><button>نمایش شماره</button></div></div><section><h2>توضیحات</h2><p>۰۹۱۲۳۴۵۶۷۸۹</p></section></main>');await page.evaluate(reader);expect(await page.evaluate(()=>(globalThis as any).LeadRadarReader.contactPhones())).toEqual([]);await page.close();});
 it('fills the official phone field, submits once, and leaves the OTP entry to the user',async()=>{
   const page=await fixture('https://www.sheypoor.com/session',`<form><input name="username"><button type="submit">ورود یا ثبت نام در شیپور</button></form>`);
   await page.evaluate(()=>{const doc=(globalThis as any).document;(globalThis as any).submits=0;doc.querySelector('form').onsubmit=(e:{preventDefault:()=>void})=>{e.preventDefault();(globalThis as any).submits++;doc.querySelector('form').innerHTML='<input autocomplete="one-time-code" name="otp"><p>کد تأیید را وارد کنید</p>';};});

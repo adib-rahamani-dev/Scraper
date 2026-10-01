@@ -9,7 +9,8 @@ export async function adsWorkbook(ads: ExportAd[], title='آگهی‌ها'):Prom
   sheet.columns=fields.map(([key,header,width])=>({key,header,width}));
   for(const ad of ads) {
     const attributes=safeJson(ad.attributes || '[]').map(v=>{const a=v as {label:string;value:string};return `${a.label}: ${a.value}`;}).join('\n');
-    const row=sheet.addRow({...ad,source:ad.source==='divar'?'دیوار':'شیپور',attributes,images:safeJson(ad.images||'[]').join('\n'),saved_at:new Date(ad.saved_at)});
+    const sourceNames:Record<string,string>={divar:'دیوار',sheypoor:'شیپور','iran-tejarat':'ایران تجارت',niyazban:'نیازبان'};
+    const row=sheet.addRow({...ad,source:sourceNames[ad.source]||ad.source,attributes,images:safeJson(ad.images||'[]').join('\n'),saved_at:new Date(ad.saved_at)});
     row.alignment={vertical:'top',wrapText:true};row.height=ads.length>100?44:70;row.font={name:'Tahoma',size:10};
     row.getCell('phone').numFmt='@';row.getCell('saved_at').numFmt='yyyy-mm-dd hh:mm';
     row.getCell('url').value={text:ad.url,hyperlink:ad.url};row.getCell('url').font={color:{argb:'FF156B8A'},underline:true,name:'Tahoma',size:10};

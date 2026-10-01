@@ -10,8 +10,11 @@ type ReadAd={source:BrowserSource;title:string;url:string;topic:string;city:stri
 type Reader={ready:(kind:string,timeout?:number)=>Promise<ReadAd|{source:BrowserSource;context:{topic:string;city:string;region:string;searchUrl:string};items:ReadAd[]}>;detail:(context:Partial<AdInput>)=>ReadAd;contactPhones:()=>string[]};
 
 export async function readCurrentSearch(source:BrowserSource,page:Page) {
-  await page.evaluate(readerScript);
-  const result=await page.evaluate(async()=>await (globalThis as unknown as {LeadRadarReader:Reader}).LeadRadarReader.ready('search',30000));
+  // Official search pages may redirect to a category after DOMContentLoaded.
+  // Retry only that navigation race; never retry access restrictions.
+  const read=async()=>{await page.evaluate(readerScript);return await page.evaluate(async()=>await (globalThis as unknown as {LeadRadarReader:Reader}).LeadRadarReader.ready('search',30000));};
+  let result;
+  try{result=await read();}catch(error){if(!/Execution context was destroyed/.test(String(error)))throw error;await page.waitForLoadState('domcontentloaded',{timeout:15000});result=await read();}
   if(!('items' in result)||result.source!==source)throw new Error('منبع جست‌وجو نامعتبر است.');
   return result;
 }

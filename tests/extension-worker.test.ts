@@ -24,3 +24,10 @@ it('persists the queue and can collect a matching detail after the worker is rec
   expect(restored.local.captureJob.processed).toBe(1);expect(restored.requests.find(r=>r.path.endsWith('/capture'))?.body.runId).toBe('run-1');
   restored.listeners.alarm!({name:'capture-step'});await restored.settle();expect(restored.local.captureJob.status).toBe('completed');
 });
+it('accepts only trusted panel controls and never exposes the connection token',async()=>{
+  const w=worker();const panel={id:'test',url:'https://lead-radar-jade.vercel.app/'};
+  const token='A'.repeat(43);expect((await w.send({action:'configure',token},panel)).error).toBeUndefined();
+  expect(w.local.leadRadarToken).toBe(token);const status=await w.send({action:'status'},panel);expect(status.result.connected).toBe(true);expect(JSON.stringify(status)).not.toContain(token);
+  expect((await w.send({action:'contact',payload:{source:'divar'}},panel)).error).toBeTruthy();
+  expect((await w.send({action:'configure',token},{id:'test',url:'https://evil.example/'})).error).toBeTruthy();
+});

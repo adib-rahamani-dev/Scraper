@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { RotateCcw, Trash2 } from 'lucide-react';
 
 export default function HistoryControls({ path, selectedId, selectedStatus, refreshKey, onChanged }: {
-  path: '/api/runs' | '/api/capture-runs'; selectedId?: string | number;
+  path: '/api/runs' | '/api/capture-runs' | '/api/companion/capture-runs'; selectedId?: string | number;
   selectedStatus?: string; refreshKey: string; onChanged: () => void | Promise<void>;
 }) {
   const [counts, setCounts] = useState({ archived: 0, removable: 0 });

@@ -13,6 +13,8 @@ import { capturedCsv, extensionTokenStatus, importCapturedAds, issueExtensionTok
 import { createCaptureRun, listCaptureRuns, updateCaptureRun } from '../shared/capture-data.js';
 import { adsWorkbook } from './excel-export.js';
 import { refreshDatabase } from './db.js';
+import { updateRun, setProjectStatus } from './db.js';
+import { resetData, restoreData } from '../shared/data-reset.js';
 import { deleteHistory, restoreHistory, historyCounts, type HistoryTable } from '../shared/history.js';
 
 const app = express();
@@ -107,6 +109,17 @@ app.post('/api/auth/logout', (_request, response) => {
 });
 
 app.get('/api/dashboard', (_request, response) => response.json(dashboard()));
+app.get('/api/runtime',(_request,response)=>response.json({local:!isVercel}));
+for(const [action,handler] of [['reset',resetData],['restore',restoreData]] as const)app.post(`/api/data/${action}`,async(request,response)=>{
+  try{const result=handler(db,'main',request.body??{});await persistDatabase();response.json(result);}catch(error){response.status(400).json({error:error instanceof Error?error.message:'تغییر بانک ممکن نشد.'});}
+});
+app.use('/api/companion',async(request,response)=>{
+  if(isVercel)return response.status(400).json({error:'در نسخهٔ آنلاین از افزونه استفاده کن.'});
+  if(!/^\/(?:state|capture-runs(?:\/history(?:\/(?:delete|restore))?|\/[a-z0-9-]+\/cancel)?|listings(?:\/\d+(?:\/enrich)?)?|export\.(?:csv|xlsx)|data\/(?:reset|restore)|browser\/(?:divar|sheypoor)\/(?:search|navigate|login|tabs|extract|capture-contact))$/.test(request.path))return response.status(404).json({error:'مسیر نامعتبر است.'});
+  try{const target=new URL('http://127.0.0.1:4311/api'+request.url);const result=await fetch(target,{method:request.method,headers:{'content-type':'application/json'},body:['GET','HEAD'].includes(request.method)?undefined:JSON.stringify(request.body??{}),signal:AbortSignal.timeout(60000)});
+    response.status(result.status);for(const name of ['content-type','content-disposition']){const value=result.headers.get(name);if(value)response.setHeader(name,value);}response.send(Buffer.from(await result.arrayBuffer()));
+  }catch{response.status(503).json({error:'همراه مرورگر فعال نیست. npm run companion را اجرا کن.'});}
+});
 for (const [path, table] of [['runs', 'runs'], ['capture-runs', 'captured_ads_runs']] as Array<[string, HistoryTable]>) {
   app.get(`/api/${path}/history`, (_request, response) => response.json(historyCounts(db, table)));
   for (const [action, handler] of [['delete', deleteHistory], ['restore', restoreHistory]] as const) {
@@ -258,8 +271,11 @@ app.get('/api/runs/:id', (request, response) => {
   if (!run) return response.status(404).json({ error: 'اجرا پیدا نشد.' });
   response.json(run);
 });
-app.post('/api/runs/:id/cancel', (request, response) => {
-  const stopped = cancelRun(Number(request.params.id));
+app.post('/api/runs/:id/cancel', async (request, response) => {
+  const id=Number(request.params.id);let stopped = cancelRun(id);
+  const run=getRun(id);
+  if(!stopped&&run&&['running','queued'].includes(run.status)){updateRun(id,{status:'cancelled',finishedAt:new Date().toISOString(),message:'اجرای باقی‌مانده از نشست قبلی لغو شد'});setProjectStatus(run.projectId,'ready');stopped=true;}
+  if(stopped)await persistDatabase();
   response.status(stopped ? 202 : 409).json({ ok: stopped, error: stopped ? undefined : 'این اجرا فعال نیست.' });
 });
 
@@ -297,6 +313,7 @@ app.get('/api/export.csv', (request, response) => {
   const projectId = request.query.projectId ? Number(request.query.projectId) : undefined;
   sendCsv(response, listLeads({ projectId, limit: 100_000 }), 'lead-radar');
 });
+app.get('/api/export.xlsx',async(request,response)=>{const leads=listLeads({campaignId:request.query.campaignId?Number(request.query.campaignId):undefined,limit:100000});response.setHeader('content-type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');response.setHeader('content-disposition','attachment; filename="lead-radar.xlsx"');response.send(await adsWorkbook(leads.map(lead=>({...lead,topic:lead.category,region:'',price:'',description:'',note:'',saved_at:lead.discoveredAt}))));});
 
 app.get('/api/campaigns/:id/export.csv', (request, response) => {
   const campaign = getCampaign(Number(request.params.id));

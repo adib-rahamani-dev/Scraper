@@ -66,9 +66,13 @@ async function dispatchLogin(tabId) {
 chrome.runtime.onMessage.addListener((message,sender,respond)=>{
   (async()=>{
     const own=sender.id===chrome.runtime.id && sender.url?.startsWith(chrome.runtime.getURL(''));
+    let panel=false;try{panel=sender.id===chrome.runtime.id&&['https://lead-radar-jade.vercel.app','http://127.0.0.1:5173','http://localhost:5173','http://127.0.0.1:4300'].includes(new URL(sender.url).origin);}catch{}
     let source;try{const host=new URL(sender.url).hostname;source=Object.keys(hosts).find(s=>hosts[s].includes(host));}catch{}
-    if(!own&&!source)throw new Error('فرستنده نامعتبر است.');
+    if(!own&&!source&&!panel)throw new Error('فرستنده نامعتبر است.');
     const action=message?.action;
+    if(panel&&!['status','configure','login','search','stop','resume','options'].includes(action))throw new Error('دستور پنل نامعتبر است.');
+    if(action==='status'&&(own||panel)){const state=await chrome.storage.local.get(['captureJob','leadRadarToken','leadRadarEndpoint']);return {connected:Boolean(state.leadRadarToken),endpoint:state.leadRadarEndpoint,job:state.captureJob?{status:state.captureJob.status,processed:state.captureJob.processed,total:state.captureJob.total,message:state.captureJob.message}:null};}
+if(action==='configure'&&panel){if(typeof message.token!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(message.token))throw new Error('کلید اتصال نامعتبر است.');const endpoint=new URL(sender.url).hostname==='lead-radar-jade.vercel.app'?CLOUD_API:LOCAL_API;const job=await jobGet();if(job&&['running','paused'].includes(job.status))throw new Error('ابتدا اجرای فعال را متوقف کن.');await chrome.storage.local.set({leadRadarToken:message.token,leadRadarEndpoint:endpoint});return {connected:true};}
     if(action==='options'){await chrome.runtime.openOptionsPage();return {};}
     if(action==='dashboard'){const {leadRadarEndpoint}=await chrome.storage.local.get('leadRadarEndpoint');await chrome.tabs.create({url:leadRadarEndpoint===LOCAL_API?'http://127.0.0.1:5173/':CLOUD_API});return {};}
     if(action==='ready'&&sender.tab&&source){
@@ -79,7 +83,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
         await collect(sender.tab.id,sender.url);
       });return {};
     }
-    if(action==='login'&&own){
+    if(action==='login'&&(own||panel)){
       const phone=String(message.phone||'').replace(/[۰-۹]/g,c=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(c))).replace(/[\s-]/g,'');if(!/^09\d{9}$/.test(phone))throw new Error('شمارهٔ همراه معتبر وارد کن.');
       for(const s of message.source==='both'?['divar','sheypoor']:[message.source]){
         if(!hosts[s])throw new Error('سایت نامعتبر است.');
@@ -90,7 +94,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
         await chrome.tabs.update(tab.id,{url:s==='divar'?'https://divar.ir/':'https://www.sheypoor.com/session/myAccount/myListings/all'});
       }return {};
     }
-    if(action==='search'&&own){const s=message.source;if(!hosts[s])throw new Error('سایت نامعتبر است.');
+    if(action==='search'&&(own||panel)){const s=message.source;if(!hosts[s])throw new Error('سایت نامعتبر است.');
       const topic=String(message.topic||'').trim().slice(0,80);if(topic.length<2)throw new Error('موضوع را وارد کن.');
       const city=/^[a-z-]+$/.test(message.city)?message.city:'iran';const raw=message.url|| (s==='divar'?`https://divar.ir/s/${city}?q=${encodeURIComponent(topic)}`:`https://www.sheypoor.com/s/${city==='iran'?'iran':city}?q=${encodeURIComponent(topic)}`);
       const url=official(raw,s,'s');await api('/api/extension/ping',undefined,'GET');
