@@ -11,6 +11,8 @@
     "dev": "concurrently -n API,WEB -c cyan,magenta \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "tsx watch src/server/index.ts",
     "dev:web": "vite --host 127.0.0.1",
+    "prebuild": "npm run package:extension",
+    "package:extension": "node scripts/package-extension.mjs",
     "build": "tsc -b && vite build",
     "start": "tsx src/server/index.ts",
     "companion": "tsx src/companion/server.ts",

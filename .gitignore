@@ -10,3 +10,4 @@ data/browser-profiles/
 .vercel
 .env*
 artifacts/
+extension/build-info.json
