@@ -115,7 +115,7 @@ for(const [action,handler] of [['reset',resetData],['restore',restoreData]] as c
 });
 app.use('/api/companion',async(request,response)=>{
   if(isVercel)return response.status(400).json({error:'در نسخهٔ آنلاین از افزونه استفاده کن.'});
-  if(!/^\/(?:state|capture-runs(?:\/history(?:\/(?:delete|restore))?|\/[a-z0-9-]+\/cancel)?|listings(?:\/\d+(?:\/enrich)?)?|export\.(?:csv|xlsx)|data\/(?:reset|restore)|browser\/(?:divar|sheypoor)\/(?:search|navigate|login|tabs|extract|capture-contact))$/.test(request.path))return response.status(404).json({error:'مسیر نامعتبر است.'});
+  if(!/^\/(?:state|capture-runs(?:\/history(?:\/(?:delete|restore))?|\/[a-z0-9-]+\/(?:cancel|resume))?|listings(?:\/\d+(?:\/enrich)?)?|export\.(?:csv|xlsx)|data\/(?:reset|restore)|browser\/(?:divar|sheypoor)\/(?:search|navigate|login|tabs|extract|capture-contact))$/.test(request.path))return response.status(404).json({error:'مسیر نامعتبر است.'});
   try{const target=new URL('http://127.0.0.1:4311/api'+request.url);const result=await fetch(target,{method:request.method,headers:{'content-type':'application/json'},body:['GET','HEAD'].includes(request.method)?undefined:JSON.stringify(request.body??{}),signal:AbortSignal.timeout(60000)});
     response.status(result.status);for(const name of ['content-type','content-disposition']){const value=result.headers.get(name);if(value)response.setHeader(name,value);}response.send(Buffer.from(await result.arrayBuffer()));
   }catch{response.status(503).json({error:'همراه مرورگر فعال نیست. npm run companion را اجرا کن.'});}
@@ -131,7 +131,7 @@ for (const [path, table] of [['runs', 'runs'], ['capture-runs', 'captured_ads_ru
 }
 app.get('/api/capture-runs',(_request,response)=>response.json(listCaptureRuns(db,'captured_ads')));
 app.get('/api/captured-ads', (request, response) => response.json(listCapturedAds({
-  source: String(request.query.source ?? ''), status: String(request.query.status ?? ''), search: String(request.query.search ?? ''),runId:String(request.query.runId??''),
+  source: String(request.query.source ?? ''), status: String(request.query.status ?? ''), search: String(request.query.search ?? ''),runId:String(request.query.runId??''),phoneOnly:request.query.phoneOnly==='1',
 })));
 app.post('/api/captured-ads/import', async (request, response) => {
   if (request.body?.confirm !== true) return response.status(400).json({ error: 'تأیید انتقال داده به ابر لازم است.' });
@@ -147,13 +147,13 @@ app.patch('/api/captured-ads/:id', async (request, response) => {
   } catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : 'به‌روزرسانی ممکن نشد.' }); }
 });
 app.get('/api/captured-ads/export.csv', (request, response) => {
-  const ads = listCapturedAds({ source: String(request.query.source ?? ''), status: String(request.query.status ?? ''), search: String(request.query.search ?? ''),runId:String(request.query.runId??'') });
+  const ads = listCapturedAds({ source: String(request.query.source ?? ''), status: String(request.query.status ?? ''), search: String(request.query.search ?? ''),runId:String(request.query.runId??''),phoneOnly:true });
   response.setHeader('content-type', 'text/csv; charset=utf-8');
   response.setHeader('content-disposition', 'attachment; filename="lead-radar-captured.csv"');
   response.send(capturedCsv(ads));
 });
 app.get('/api/captured-ads/export.xlsx',async(request,response)=>{
-  const ads=listCapturedAds({source:String(request.query.source??''),status:String(request.query.status??''),search:String(request.query.search??''),runId:String(request.query.runId??'')});
+  const ads=listCapturedAds({source:String(request.query.source??''),status:String(request.query.status??''),search:String(request.query.search??''),runId:String(request.query.runId??''),phoneOnly:true});
   response.setHeader('content-type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   response.setHeader('content-disposition','attachment; filename="lead-radar-ads.xlsx"');
   response.send(await adsWorkbook(ads));

@@ -95,10 +95,11 @@ export function saveAd(ad: AdInput, options: { replaceTitle?: boolean; refreshMe
   return { ad: db.prepare('SELECT * FROM saved_ads WHERE id = ?').get(Number(result.lastInsertRowid)) as SavedAd, duplicate: false };
 }
 
-export function getAds(filters: { source?: string; status?: string; search?: string;runId?:string } = {}): SavedAd[] {
-  if(filters.runId)return captureRunAds<SavedAd>(db,'saved_ads',filters.runId).filter(ad=>(!filters.source||ad.source===filters.source)&&(!filters.status||ad.status===filters.status)&&(!filters.search||`${ad.title} ${ad.topic} ${ad.city} ${ad.region}`.includes(filters.search)));
+export function getAds(filters: { source?: string; status?: string; search?: string;runId?:string;phoneOnly?:boolean } = {}): SavedAd[] {
+  if(filters.runId)return captureRunAds<SavedAd>(db,'saved_ads',filters.runId).filter(ad=>(!filters.phoneOnly||Boolean(ad.phone?.trim()))&&(!filters.source||ad.source===filters.source)&&(!filters.status||ad.status===filters.status)&&(!filters.search||`${ad.title} ${ad.topic} ${ad.city} ${ad.region}`.includes(filters.search)));
   const clauses: string[] = [];
   const params: string[] = [];
+  if(filters.phoneOnly)clauses.push("phone IS NOT NULL AND TRIM(phone) <> ''");
   if (filters.source === 'divar' || filters.source === 'sheypoor') { clauses.push('source = ?'); params.push(filters.source); }
   if (['new', 'reviewing', 'contacted', 'done'].includes(filters.status ?? '')) { clauses.push('status = ?'); params.push(filters.status!); }
   if (filters.search) {

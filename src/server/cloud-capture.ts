@@ -138,10 +138,11 @@ export function importCapturedAds(value: unknown) {
   return { saved, duplicate: records.length - saved, phones };
 }
 
-export function listCapturedAds(filters: { source?: string; status?: string; search?: string; runId?:string } = {}): CapturedAd[] {
-  if(filters.runId) return captureRunAds<CapturedAd>(db,'captured_ads',filters.runId).filter(ad=>(!filters.source||ad.source===filters.source)&&(!filters.status||ad.status===filters.status)&&(!filters.search||`${ad.title} ${ad.topic} ${ad.city} ${ad.region} ${ad.phone??''}`.includes(filters.search)));
+export function listCapturedAds(filters: { source?: string; status?: string; search?: string; runId?:string;phoneOnly?:boolean } = {}): CapturedAd[] {
+  if(filters.runId) return captureRunAds<CapturedAd>(db,'captured_ads',filters.runId).filter(ad=>(!filters.phoneOnly||Boolean(ad.phone?.trim()))&&(!filters.source||ad.source===filters.source)&&(!filters.status||ad.status===filters.status)&&(!filters.search||`${ad.title} ${ad.topic} ${ad.city} ${ad.region} ${ad.phone??''}`.includes(filters.search)));
   const where: string[] = [];
   const params: string[] = [];
+  if(filters.phoneOnly)where.push("phone IS NOT NULL AND TRIM(phone) <> ''");
   if (filters.source === 'divar' || filters.source === 'sheypoor') { where.push('source = ?'); params.push(filters.source); }
   if (['new', 'reviewing', 'contacted', 'done'].includes(filters.status ?? '')) { where.push('status = ?'); params.push(filters.status!); }
   if (filters.search) {

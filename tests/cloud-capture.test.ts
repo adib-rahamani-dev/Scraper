@@ -11,6 +11,21 @@ const {createCaptureRun,updateCaptureRun}=await import('../src/shared/capture-da
 const ad = { source: 'divar', title: 'گوشی تست', url: 'https://divar.ir/v/sample-ad/test', topic: 'موبایل', city: 'قزوین', region: '', price: '۱۲ میلیون تومان', description: 'تماس ۰۹۱۲۳۴۵۶۷۸۹' };
 
 describe('cloud capture', () => {
+  it('filters phone-ready leads in the bank and in search snapshots without deleting pending ads',()=>{
+    const run=createCaptureRun(db,'captured_ads','divar',{searchUrl:'https://divar.ir/s/qazvin?q=phone-ready',topic:'phone-ready',total:2});
+    const ready={...ad,url:'https://divar.ir/v/phone-ready/11'};
+    const pending={...ad,url:'https://divar.ir/v/phone-pending/12'};
+    saveCapturedBatch('divar',[ready],'detail',run.id);
+    saveCapturedBatch('divar',[pending],'detail',run.id);
+    expect(listCapturedAds({runId:run.id,phoneOnly:true})).toEqual([]);
+    saveCapturedContact('divar',{source:'divar',ad:ready,phone:'09123456001',basis:'public-business',contactSource:'visible-after-manual-reveal',confirmed:true});
+    expect(listCapturedAds({runId:run.id,phoneOnly:true}).map(item=>item.url)).toEqual([ready.url]);
+    expect(listCapturedAds({phoneOnly:true}).some(item=>item.url===pending.url)).toBe(false);
+    expect(listCapturedAds({runId:run.id})).toHaveLength(2);
+    db.prepare('DELETE FROM captured_ads_members WHERE run_id=?').run(run.id);
+    db.prepare('DELETE FROM captured_ads_runs WHERE id=?').run(run.id);
+    db.prepare('DELETE FROM captured_ads WHERE url IN (?,?)').run(ready.url,pending.url);
+  });
   it('keeps search-specific snapshots for an ad reused across two runs',()=>{
     const first=createCaptureRun(db,'captured_ads','divar',{searchUrl:'https://divar.ir/s/qazvin?q=mobile',topic:'موبایل',total:1});
     const second=createCaptureRun(db,'captured_ads','divar',{searchUrl:'https://divar.ir/s/qazvin?q=samsung',topic:'سامسونگ',total:1});

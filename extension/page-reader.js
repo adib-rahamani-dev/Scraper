@@ -32,7 +32,7 @@
   }
   function blocked() {
     const body=document.body?.innerText || '';
-    return /کپچا|تعداد درخواست.*زیاد|دسترسی.*محدود|access denied|verify you are human|too many requests/i.test(body) || Boolean(document.querySelector('iframe[src*="captcha"],iframe[src*="challenge"]'));
+    return /کپچا|تعداد درخواست.*زیاد|دسترسی.*محدود|access denied|verify you are human|too many requests/i.test(body) || [...document.querySelectorAll('iframe[src*="captcha"],iframe[src*="challenge"],.g-recaptcha,.h-captcha')].some(visible);
   }
   function contactPhones() {
     if(!url(location.href)) throw new Error('ابتدا صفحهٔ یک آگهی را باز کن.');

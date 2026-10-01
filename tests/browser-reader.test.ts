@@ -6,6 +6,12 @@ beforeAll(async()=>{browser=await chromium.launch({channel:'chrome',headless:tru
 afterAll(async()=>{await browser?.close();});
 async function fixture(url:string,html:string):Promise<Page>{const page=await browser.newPage();await page.route('**/*',route=>route.fulfill({status:200,contentType:'text/html; charset=utf-8',body:'<!doctype html><meta charset="utf-8">'+html}));await page.goto(url);return page;}
 const reader=readFileSync('extension/page-reader.js','utf8');const login=readFileSync('extension/login.js','utf8');
+it('detects a visible CAPTCHA but ignores dormant hidden challenge widgets',async()=>{
+  const page=await fixture('https://divar.ir/v/fixture/1','<h1>آگهی</h1><div class="g-recaptcha" hidden>widget</div>');
+  await page.evaluate(reader);expect(await page.evaluate(()=>(globalThis as any).LeadRadarReader.blocked())).toBe(false);await page.close();
+  const challenge=await fixture('https://divar.ir/s/qazvin','<div class="h-captcha" style="width:200px;height:100px">verification</div>');
+  await challenge.evaluate(reader);expect(await challenge.evaluate(()=>(globalThis as any).LeadRadarReader.blocked())).toBe(true);await challenge.close();
+});
 it('reads Divar description following the description heading, not the publication row',async()=>{
   const page=await fixture('https://divar.ir/v/fixture/1',`<h1>موبایل واقعی</h1><div class="kt-info-row__title">دقایقی پیش در قزوین، خ فضیلت</div><div class="kt-description-row">تاریخ انتشار</div><section><div><div class="kt-title-row"><h2>توضیحات</h2></div></div><div class="kt-description-row">رم ۶ و حافظه ۲۵۶<br>تماس ۰۹۱۲۳۴۵۶۷۸۹</div></section><div class="kt-unexpandable-row"><span class="kt-unexpandable-row__title">حافظه</span><span class="kt-unexpandable-row__value">۲۵۶ گیگابایت</span></div>`);
   await page.evaluate(reader);const result=await page.evaluate(()=> (globalThis as any).LeadRadarReader.detail({topic:'موبایل'}));

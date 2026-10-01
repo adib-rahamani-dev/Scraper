@@ -15,7 +15,7 @@ async function globalRequest<T>(path: string, options?: RequestInit): Promise<T>
   return data as T;
 }
 
-export default function CloudCaptureView({localMode=false}:{localMode?:boolean}) {
+export default function CloudCaptureView({localMode=false,sourceFilter=''}:{localMode?:boolean;sourceFilter?:string}) {
   const request=async<T,>(path:string,options?:RequestInit):Promise<T>=>{
     if(!localMode)return await globalRequest<T>(path,options);
     const mapped=path.replace('/api/captured-ads','/api/listings').replace('/api/','/api/companion/');
@@ -28,7 +28,8 @@ export default function CloudCaptureView({localMode=false}:{localMode?:boolean})
   const [ads, setAds] = useState<Ad[]>([]);
   const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null);
   const [freshToken, setFreshToken] = useState('');
-  const [source, setSource] = useState('');
+  const [source, setSource] = useState(sourceFilter);
+  const [phoneOnly,setPhoneOnly]=useState(true);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -39,12 +40,12 @@ export default function CloudCaptureView({localMode=false}:{localMode?:boolean})
   const [runId,setRunId]=useState('');
   const [followLatest,setFollowLatest]=useState(true);
   const requestGeneration=useRef(0);
-  const query = useMemo(() => new URLSearchParams({ source, status, search,runId }), [source, status, search,runId]);
+  const query = useMemo(() => new URLSearchParams({ source:sourceFilter||source, status, search,runId,phoneOnly:phoneOnly?'1':'0' }), [source,sourceFilter,status,search,runId,phoneOnly]);
 
   const refresh = async () => {
     const generation=++requestGeneration.current;
     try {
-      const history=await request<CaptureRun[]>('/api/capture-runs');
+      const history=(await request<CaptureRun[]>('/api/capture-runs')).filter(run=>!sourceFilter||run.source===sourceFilter);
       if(generation!==requestGeneration.current)return;
       const activeId=followLatest?(history[0]?.id||''):history.some(run=>run.id===runId)?runId:'';
       const activeQuery=new URLSearchParams(query);activeQuery.set('runId',activeId);
@@ -108,7 +109,9 @@ export default function CloudCaptureView({localMode=false}:{localMode?:boolean})
     <div className="cloud-stats"><span>آگهی‌های این فیلتر: <b>{ads.length.toLocaleString('fa-IR')}</b></span><span>شمارهٔ ثبت‌شده: <b>{totalPhones.toLocaleString('fa-IR')}</b></span><span><ShieldCheck size={15} /> شماره فقط پس از نمایان‌شدن و تأیید دستی ثبت می‌شود.</span></div>
 <section className="panel capture-results-toolbar"><div className="capture-results-heading"><h2>نتایج و تاریخچهٔ جست‌وجو</h2><div className="history-actions"><a className="primary-button" href={`${exportPath}.xlsx?${query}`}><Download size={16}/> دریافت اکسل</a><a className="ghost-button" href={`${exportPath}.csv?${query}`}>CSV</a></div><span>{runs.length.toLocaleString('fa-IR')} اجرا در تاریخچه</span></div><label>خروجی جست‌وجو <select aria-label="اجرای جست‌وجو" value={followLatest?'latest':runId} onChange={event=>{setFollowLatest(event.target.value==='latest');if(event.target.value!=='latest')setRunId(event.target.value);}}><option value="latest">آخرین جست‌وجو — به‌روزرسانی خودکار</option><option value="">همهٔ بانک آگهی‌ها</option>{runs.map(run=><option key={run.id} value={run.id}>{run.topic||'جست‌وجو'} · {run.city} · {new Date(run.created_at).toLocaleString('fa-IR')} · {run.processed}/{run.total}</option>)}</select></label>{selectedRun&&<div className="capture-run-progress" role="status"><div><strong>{runStatus[selectedRun.status]||selectedRun.status}</strong><span>{selectedRun.processed.toLocaleString('fa-IR')} / {selectedRun.total.toLocaleString('fa-IR')} آگهی · {selectedRun.message}</span><a href={selectedRun.search_url} target="_blank" rel="noreferrer">صفحهٔ جست‌وجو <ExternalLink size={13}/></a></div><progress aria-label="پیشرفت استخراج" max={selectedRun.total} value={selectedRun.processed+selectedRun.failed}/></div>}<details className="history-disclosure"><summary>مدیریت و پاک‌سازی تاریخچه</summary><HistoryControls path={localMode?"/api/companion/capture-runs":"/api/capture-runs"} selectedId={selectedRun?.id} selectedStatus={selectedRun?.status} refreshKey={runs.map(run=>`${run.id}:${run.status}`).join(',')} onChanged={refresh} /></details></section>
     <div className="cloud-filters"><input aria-label="جست‌وجو" placeholder="عنوان، موضوع، شهر یا شماره…" value={search} onChange={event => setSearch(event.target.value)} /><select aria-label="منبع" value={source} onChange={event => setSource(event.target.value)}><option value="">همهٔ منابع</option><option value="divar">دیوار</option><option value="sheypoor">شیپور</option></select><select aria-label="وضعیت" value={status} onChange={event => setStatus(event.target.value)}><option value="">همهٔ وضعیت‌ها</option><option value="new">جدید</option><option value="reviewing">در بررسی</option><option value="contacted">تماس‌گرفته</option><option value="done">پایان‌یافته</option></select></div>
-{loading ? <div className="cloud-empty">در حال دریافت…</div> : !ads.length ? <div className="cloud-empty">هنوز آگهی‌ای در این بخش ثبت نشده است. پس از اتصال افزونه، یک صفحهٔ جست‌وجو را در دیوار یا شیپور باز کن و دکمهٔ ثبت را بزن.</div> : <div className="cloud-list">{ads.map(ad => <AdCard key={ad.id} ad={ad} onSave={updateAd} onOpen={localMode?openLocalAd:undefined} onContact={localMode?captureLocalContact:undefined} />)}</div>}
+    <label className="phone-only-control"><input type="checkbox" checked={phoneOnly} onChange={event=>setPhoneOnly(event.target.checked)}/> فقط آگهی‌های دارای شمارهٔ ثبت‌شده</label>
+    <p className="muted">خروجی اکسل و CSV همیشه فقط آگهی‌های شماره‌دار است. برای ثبت دستی شمارهٔ نمایان، این فیلتر را موقتاً بردار.</p>
+{loading ? <div className="cloud-empty">در حال دریافت…</div> : !ads.length ? <div className="cloud-empty">{phoneOnly?'در این جست‌وجو هنوز شمارهٔ تأییدشده‌ای ثبت نشده؛ آگهی بدون شماره سرنخ تماس محسوب نمی‌شود.':'هنوز آگهی‌ای در این جست‌وجو ثبت نشده است.'}</div> : <div className="cloud-list">{ads.map(ad => <AdCard key={ad.id} ad={ad} onSave={updateAd} onOpen={localMode?openLocalAd:undefined} onContact={localMode?captureLocalContact:undefined} />)}</div>}
   </div>;
 }
 

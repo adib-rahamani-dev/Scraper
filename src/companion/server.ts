@@ -7,7 +7,7 @@ import { cleanText, detailUrl, parseSource, searchPageContext, searchUrl, source
 import { normalizeIranianPhone } from '../server/extractor.js';
 import { campaignCities } from '../server/source-catalog.js';
 import { captureCurrentDetail, captureCurrentSearch, captureVisibleContact } from './capture.js';
-import { cancelDetailJob, startDetailJob } from './jobs.js';
+import { assertSourceAvailable, cancelDetailJob, resumeDetailJob, startDetailJob } from './jobs.js';
 import { listCaptureRuns, getCaptureRun, updateCaptureRun } from '../shared/capture-data.js';
 import { adsWorkbook } from '../server/excel-export.js';
 import { resetData, restoreData } from '../shared/data-reset.js';
@@ -53,14 +53,17 @@ app.get('/api/capture-runs/history',(_req,res)=>res.json(historyCounts(db,'saved
 app.post('/api/capture-runs/history/delete',(req,res)=>res.json(deleteHistory(db,'saved_ads_runs',req.body??{})));
 app.post('/api/capture-runs/history/restore',(req,res)=>res.json(restoreHistory(db,'saved_ads_runs',req.body??{})));
 app.post('/api/browser/:source/extract',async(req,res)=>res.status(202).json(await startDetailJob(parseSource(req.params.source),Number(req.body.tabIndex),Number(req.body.limit??20))));
+app.post('/api/capture-runs/:id/resume',(req,res)=>res.json(resumeDetailJob(String(req.params.id))));
 app.post('/api/capture-runs/:id/cancel',(req,res)=>{const id=String(req.params.id);let ok=cancelDetailJob(id);const run=getCaptureRun(db,'saved_ads',id);if(!ok&&run&&['running','paused'].includes(run.status)){updateCaptureRun(db,'saved_ads',id,{status:'cancelled',message:'اجرا متوقف شد'});ok=true;}res.json({ok});});
 app.post('/api/browser/:source/search', async (req, res) => {
   const source = parseSource(req.params.source);
+  assertSourceAvailable(source);
   const url = searchUrl(source, req.body.topic, req.body.city);
   res.json({ url: await navigateSearch(source, url), tabs: await tabs(source) });
 });
 app.post('/api/browser/:source/navigate', async (req, res) => {
   const source = parseSource(req.params.source);
+  assertSourceAvailable(source);
   const url = String(req.body.url ?? '');
   if (!searchPageContext(source, url)) throw new Error('لینک باید صفحهٔ جست‌وجوی همان سایت باشد.');
   res.json({ url: await navigateSearch(source, url), tabs: await tabs(source) });
@@ -112,7 +115,7 @@ app.post('/api/listings', async (req, res) => {
   res.status(result.duplicate ? 200 : 201).json({ ad: result.ad, duplicate: Boolean(result.duplicate) });
 });
 app.get('/api/listings', (req, res) => {
-  res.json({ listings: getAds({ source: String(req.query.source ?? ''), status: String(req.query.status ?? ''), search: cleanText(req.query.search, 80),runId:String(req.query.runId??'') }) });
+  res.json({ listings: getAds({ source: String(req.query.source ?? ''), status: String(req.query.status ?? ''), search: cleanText(req.query.search, 80),runId:String(req.query.runId??''),phoneOnly:req.query.phoneOnly==='1' }) });
 });
 app.post('/api/listings/:id/enrich', async (req, res) => {
   const id = Number(req.params.id);
@@ -132,14 +135,14 @@ app.patch('/api/listings/:id', (req, res) => {
   res.json({ ad });
 });
 app.get('/api/export.csv', (req, res) => {
-  const csv = adsCsv(getAds({ source: String(req.query.source ?? ''), status: String(req.query.status ?? ''), search: cleanText(req.query.search, 80),runId:String(req.query.runId??'') }));
+  const csv = adsCsv(getAds({ source: String(req.query.source ?? ''), status: String(req.query.status ?? ''), search: cleanText(req.query.search, 80),runId:String(req.query.runId??''),phoneOnly:true }));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="saved-ads.csv"');
   res.send(csv);
 });
 app.get('/api/export.xlsx',async(req,res)=>{
   res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition','attachment; filename="saved-ads.xlsx"');
-  res.send(await adsWorkbook(getAds({source:String(req.query.source??''),status:String(req.query.status??''),search:cleanText(req.query.search,80),runId:String(req.query.runId??'')})));
+  res.send(await adsWorkbook(getAds({source:String(req.query.source??''),status:String(req.query.status??''),search:cleanText(req.query.search,80),runId:String(req.query.runId??''),phoneOnly:true})));
 });
 app.get('/api/export.json', (_req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="saved-ads.json"');
