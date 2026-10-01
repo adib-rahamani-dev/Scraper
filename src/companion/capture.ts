@@ -11,6 +11,19 @@ const readerScript=readFileSync(resolve('extension/page-reader.js'),'utf8');
 type ReadAd={source:BrowserSource;title:string;url:string;topic:string;city:string;region:string;price:string;description:string;category:string;attributes:unknown[];images:string[];published_at:string};
 type Reader={ready:(kind:string,timeout?:number)=>Promise<ReadAd|{source:BrowserSource;context:{topic:string;city:string;region:string;searchUrl:string};items:ReadAd[]}>;detail:(context:Partial<AdInput>)=>ReadAd;contactPhones:()=>string[];revealContact:(options:{confirmed:boolean;basis:string;expectedUrl:string})=>Promise<string>};
 
+// Read-only diagnostics for the selected page: no clicks, no phone values,
+// no database writes, and no implicit authorization to save a contact.
+export async function visibleContactStatus(source:BrowserSource,page:Page) {
+  if(!detailUrl(source,page.url()))throw new Error('ابتدا صفحهٔ یک آگهی را باز کن.');
+  await page.evaluate(readerScript);
+  return page.evaluate(()=>{
+    const globals=globalThis as unknown as {LeadRadarReader:Reader & {blocked:()=>boolean;visible:(element:unknown)=>boolean};document:{querySelectorAll:(selector:string)=>Iterable<unknown>}};
+    const reader=globals.LeadRadarReader;
+    const loginRequired=[...globals.document.querySelectorAll('input[autocomplete="one-time-code"],input[name="otp"]')].some(element=>reader.visible(element));
+    return {visibleCount:reader.contactPhones().length,blocked:reader.blocked(),awaitingCode:loginRequired};
+  });
+}
+
 export async function revealSelectedContact(source:BrowserSource,page:Page,basis:string,expectedUrl:string){
   if(!detailUrl(source,expectedUrl)||detailUrl(source,page.url())!==detailUrl(source,expectedUrl))throw new Error('برگه با آگهی انتخاب‌شده تطابق ندارد.');
   await page.evaluate(readerScript);

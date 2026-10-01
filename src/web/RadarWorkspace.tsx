@@ -87,7 +87,7 @@ export default function RadarWorkspace({onPublicSearch,onChanged,publicLeads,cam
   return <div className="radar-workspace">
     <section className="radar-hero">
       <div className="radar-kicker"><Radar size={18}/> رادار یکپارچهٔ بازار ایران <span className={connected?'connected':''}>{connected?'مرورگر متصل':'نیازمند اتصال مرورگر'}</span></div>
-      <h1>یک موضوع. چند منبع. فقط شماره‌های ثبت‌شده.</h1>
+      <h1>یک موضوع. چند منبع. آگهی‌ها و تماس‌های ثبت‌شده.</h1>
       <p>حالت محلی: دو مرورگر مستقل برای دیوار و شیپور، همراه با پویش منابع عمومی؛ هیچ شماره‌ای حدس زده نمی‌شود.</p>
       <form className="radar-launch" onSubmit={event=>{event.preventDefault();void perform(launch);}}>
         <label>موضوع<input aria-label="موضوع" value={topic} onChange={event=>setTopic(event.target.value)} required minLength={2} placeholder="مثلاً موبایل، دوچرخه یا کابینت"/></label>
@@ -103,8 +103,8 @@ export default function RadarWorkspace({onPublicSearch,onChanged,publicLeads,cam
     </section>
     <details className="panel radar-login"><summary><Phone size={16}/> ورود به دیوار و شیپور</summary><form onSubmit={event=>{event.preventDefault();void perform(login);}}><label>شمارهٔ همراه خودت<input type="tel" inputMode="tel" value={phone} onChange={event=>setPhone(event.target.value)} required autoComplete="tel" placeholder="0912…"/></label><button className="primary-button" disabled={busy||!runtime}>آماده‌کردن ورود هر دو سایت</button><p>کد پیامکی را در سایت اصلی وارد کن. نمایش و ثبت تماس یک آگهی همچنان نیازمند اقدام و تأیید خودت است.</p></form></details>
     {!connected&&<div className="radar-connect panel"><p>{runtime?.local?'همراه محلی را با npm run companion اجرا کن.':'افزونهٔ ۲.۶ را نصب کن و صفحه را تازه کن. اجرای هم‌زمان دو مرورگر فقط در همراه محلی است؛ افزونه فعلاً یک صف مرورگر دارد.'}</p><a className="primary-button" href="/lead-radar-extension.zip" download><Download size={16}/> دانلود افزونه</a></div>}
-    {runtime&&<details className="panel radar-cleanup"><summary>مدیریت بانک و حذف همهٔ اطلاعات</summary><DataResetControls localMode={runtime.local} onChanged={()=>{setVersion(v=>v+1);onChanged();}}/></details>}
-    {source!=='public'&&runtime&&(source==='all'?['divar','sheypoor']:[source]).map(site=><section className="source-workspace" key={site}><h2>{site==='divar'?'دیوار':'شیپور'} · شماره‌های ثبت‌شده</h2><CloudCaptureView key={`${runtime.local}:${version}:${site}`} localMode={runtime.local} sourceFilter={site}/></section>)}
+    {runtime&&<section className="panel radar-cleanup"><h2>مدیریت بانک و حذف همهٔ اطلاعات</h2><DataResetControls localMode={runtime.local} onChanged={()=>{setVersion(v=>v+1);onChanged();}}/></section>}
+    {source!=='public'&&runtime&&(source==='all'?['divar','sheypoor']:[source]).map(site=><section className="source-workspace" key={site}><h2>{site==='divar'?'دیوار':'شیپور'} · آگهی‌ها و اطلاعات تماس</h2><CloudCaptureView key={`${runtime.local}:${version}:${site}`} localMode={runtime.local} sourceFilter={site}/></section>)}
     {(source==='public'||publicVisible)&&<section className="panel public-results"><div className="capture-results-heading"><h2>شماره‌های منابع عمومی ({publicContacts.length.toLocaleString('fa-IR')})</h2><a className="primary-button" href={`/api/export.xlsx${campaignId?`?campaignId=${campaignId}`:''}`}><Download size={16}/> دریافت اکسل</a></div>{publicContacts.length?publicContacts.map(lead=><article key={lead.id}><div><h3>{lead.title}</h3><span>{lead.city} · {lead.source}</span></div><a href={`tel:${lead.phone}`} dir="ltr">{lead.phone}</a><a href={lead.url} target="_blank" rel="noreferrer">مشاهدهٔ آگهی</a></article>):<p>هنوز شمارهٔ عمومی در این پویش یافت نشده است.</p>}</section>}
   </div>;
 }

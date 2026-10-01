@@ -1,5 +1,6 @@
 (() => {
-  const clean = (v, max = 300) => String(v || '').replace(/[\u200e\u200f]/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
+  const clean = (v, max = 300) => String(v || '').replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
+  const labelText=v=>clean(v,100).replace(/[\u064b-\u065f\u0670]/g,'').replace(/ي/g,'ی').replace(/ك/g,'ک').replace(/[:：]$/,'').trim();
   const digits = v => String(v || '').replace(/[۰-۹]/g, c => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(c))).replace(/[٠-٩]/g, c => String('٠١٢٣٤٥٦٧٨٩'.indexOf(c)));
   const redact = v => String(v || '').replace(/(?:\+98|0098|0|۰)?[9۹][0-9۰-۹](?:[\s\-().]*[0-9۰-۹]){8}|[0۰][1-8۱-۸][0-9۰-۹](?:[\s\-().]*[0-9۰-۹]){8}/g, '[شماره حذف شد]');
   const visible = e => Boolean(e && e.getClientRects().length && !e.closest('[hidden],[aria-hidden="true"]') && getComputedStyle(e).visibility !== 'hidden' && getComputedStyle(e).display !== 'none');
@@ -36,19 +37,19 @@
   }
   function contactPhones() {
     if(!url(location.href)) throw new Error('ابتدا صفحهٔ یک آگهی را باز کن.');
-    const parts=[];const add=node=>{if(!visible(node))return;const value=clean(node.innerText||node.textContent,3000);if(value)parts.push(value);};
+    const parts=[];const add=node=>{if(!visible(node)||node.closest('#lead-radar-extension,#lead-radar-floating-panel,.kt-description-row,[data-testid="post-description"],[itemprop="description"]'))return;const value=clean(node.innerText||node.textContent,3000);if(value)parts.push(value);};
     for(const node of document.querySelectorAll('[role="dialog"],.post-actions,[class*="contact-info"],[class*="contact-modal"],[class*="post-contact"],[data-testid*="contact"]'))add(node);
-    for(const link of document.querySelectorAll('a[href^="tel:"]'))if(visible(link))parts.push(link.getAttribute('href')||'');
+    for(const link of document.querySelectorAll('a[href^="tel:"]'))if(visible(link)&&!link.closest('.kt-description-row,[data-testid="post-description"],[itemprop="description"]')){try{parts.push(decodeURIComponent(link.getAttribute('href')||''));}catch{parts.push(link.getAttribute('href')||'');}}
     // Divar can render the revealed number as a normal row beside the label "شماره موبایل".
-    for(const label of document.querySelectorAll('main *')) {
-      if(!visible(label)||!/^(شماره موبایل|شماره تماس|تلفن تماس)$/.test(clean(label.textContent,80)))continue;
+    for(const label of document.querySelectorAll('span,dt,label,div,p,strong')) {
+      if(!visible(label)||!/^(شماره موبایل|شماره همراه|شماره تماس|تلفن تماس|تلفن|mobile number|phone number)$/i.test(labelText(label.textContent)))continue;
       let row=label.parentElement;
-      for(let level=0;row&&level<3;level++,row=row.parentElement){if(row.matches('main,body')||row.querySelector('h1,h2'))break;const value=clean(row.innerText,500);if(value)parts.push(value);if(/(?:\+98|0098|0|۰)[9۹]/.test(value))break;}
+      for(let level=0;row&&level<3;level++,row=row.parentElement){if(row.matches('main,body,[role="main"]')||row.querySelector('h1,h2'))break;add(row);if(/(?:\+98|0098|0|۰)[9۹]/.test(clean(row.innerText,500)))break;}
     }
     const phones=new Set();
-    for(const part of parts)for(const match of digits(part).matchAll(/(?:\+98|0098|0)?9\d(?:[\s\-().]*\d){8}/g)){
+    for(const part of parts)for(const match of digits(clean(part,3000)).matchAll(/(?<!\d)(?:(?:\+98|0098|98|0)?9\d(?:[\s\-().]*\d){8}|(?:\+98|0098|98|0)[1-8]\d(?:[\s\-().]*\d){8})(?!\d)/g)){
       const num=match[0].replace(/\D/g,'');const phone=num.startsWith('0098')?'0'+num.slice(4):num.startsWith('98')?'0'+num.slice(2):num.startsWith('9')?'0'+num:num;
-      if(/^09\d{9}$/.test(phone))phones.add(phone);
+      if(/^0[1-9]\d{9}$/.test(phone))phones.add(phone);
     }
     return [...phones];
   }
@@ -65,7 +66,7 @@
     let numbers=contactPhones();
     if(numbers.length>1)throw new Error('چند شماره نمایان است؛ برای جلوگیری از ثبت اشتباه چیزی ذخیره نشد.');
     if(numbers.length===1)return numbers[0];
-    const candidates=[...document.querySelectorAll('button,[role="button"]')].filter(node=>visible(node)&&!node.disabled&&!node.closest('#lead-radar-extension,#lead-radar-floating-panel')&&!/^tel:/.test(node.getAttribute('href')||'')&&/^(اطلاعات\s*تماس|نمایش\s*شماره(?:\s*تماس)?|تماس\s*با\s*فروشنده|شماره\s*تماس|تماس)$/.test(clean(node.innerText||node.getAttribute('aria-label'),60)));
+    const candidates=[...document.querySelectorAll('button,[role="button"],a')].filter(node=>visible(node)&&!node.disabled&&node.getAttribute('aria-disabled')!=='true'&&!node.closest('#lead-radar-extension,#lead-radar-floating-panel')&&(!node.matches('a')||!node.getAttribute('href')||node.getAttribute('href').startsWith('#'))&&/^(اطلاعات\s*تماس|نمایش\s*(?:اطلاعات\s*تماس|شماره(?:\s*تماس)?)|تماس\s*با\s*(?:فروشنده|آگهی[\s‌]*دهنده)|شماره\s*تماس|تماس)$/.test(labelText(node.innerText||node.getAttribute('aria-label'))));
     if(candidates.length!==1)throw new Error(candidates.length?'چند دکمهٔ تماس نمایان است؛ بخش تماس را خودت در سایت باز کن.':'دکمهٔ اطلاعات تماس شناخته نشد؛ آن را خودت در سایت باز کن.');
     candidates[0].click(); // One explicitly selected ad, one click, no retry or bulk queue.
     const deadline=Date.now()+Math.min(8000,Math.max(200,Number(timeout)||8000));

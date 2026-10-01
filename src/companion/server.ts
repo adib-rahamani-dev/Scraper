@@ -6,11 +6,12 @@ import { adsCsv, db, getAd, getAds, updateAd } from './store.js';
 import { cleanText, detailUrl, parseSource, searchPageContext, searchUrl, sources } from './policy.js';
 import { normalizeIranianPhone } from '../server/extractor.js';
 import { campaignCities } from '../server/source-catalog.js';
-import { captureCurrentDetail, captureCurrentSearch, captureVisibleContact, requestSelectedContact } from './capture.js';
+import { captureCurrentDetail, captureCurrentSearch, captureVisibleContact, requestSelectedContact, visibleContactStatus } from './capture.js';
 import { assertSourceAvailable, cancelDetailJob, resumeDetailJob, startDetailJob, restoreDetailJobs, detailJobProgress, focusDetailJob } from './jobs.js';
 import { listCaptureRuns, getCaptureRun, updateCaptureRun } from '../shared/capture-data.js';
 import { adsWorkbook } from '../server/excel-export.js';
-import { resetData, restoreData } from '../shared/data-reset.js';
+import { dataResetStatus, resetData, restoreData } from '../shared/data-reset.js';
+import { exportPhoneOnly } from '../shared/export-filter.js';
 import { deleteHistory, restoreHistory, historyCounts } from '../shared/history.js';
 
 const app = express();
@@ -35,6 +36,7 @@ app.get('/api/state', (_req, res) => {
   const count = (db.prepare('SELECT COUNT(*) AS n FROM saved_ads').get() as { n: number }).n;
   res.json({ sources: sources.map(source => ({ source, open: browserOpen(source) })), count, cities: campaignCities });
 });
+app.get('/api/data/status',(_req,res)=>res.json(dataResetStatus(db,'companion')));
 app.post('/api/data/reset',(req,res)=>res.json(resetData(db,'companion',req.body??{})));
 app.post('/api/data/restore',(req,res)=>res.json(restoreData(db,'companion',req.body??{})));
 app.post('/api/browser/:source/open', async (req, res) => {
@@ -72,6 +74,10 @@ app.post('/api/browser/:source/navigate', async (req, res) => {
 });
 app.get('/api/browser/:source/tabs', async (req, res) => {
   res.json({ tabs: await tabs(parseSource(req.params.source)) });
+});
+app.get('/api/browser/:source/contact-status',async(req,res)=>{
+  const source=parseSource(req.params.source);
+  res.json(await visibleContactStatus(source,selectedPage(source,Number(req.query.tabIndex))));
 });
 app.post('/api/browser/:source/focus', async (req, res) => {
   const page = selectedPage(parseSource(req.params.source), Number(req.body.tabIndex));
@@ -147,14 +153,14 @@ app.patch('/api/listings/:id', (req, res) => {
   res.json({ ad });
 });
 app.get('/api/export.csv', (req, res) => {
-  const csv = adsCsv(getAds({ source: String(req.query.source ?? ''), status: String(req.query.status ?? ''), search: cleanText(req.query.search, 80),runId:String(req.query.runId??''),phoneOnly:true }));
+  const csv = adsCsv(getAds({ source: String(req.query.source ?? ''), status: String(req.query.status ?? ''), search: cleanText(req.query.search, 80),runId:String(req.query.runId??''),phoneOnly:exportPhoneOnly(req.query.phoneOnly) }));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="saved-ads.csv"');
   res.send(csv);
 });
 app.get('/api/export.xlsx',async(req,res)=>{
   res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition','attachment; filename="saved-ads.xlsx"');
-  res.send(await adsWorkbook(getAds({source:String(req.query.source??''),status:String(req.query.status??''),search:cleanText(req.query.search,80),runId:String(req.query.runId??''),phoneOnly:true})));
+  res.send(await adsWorkbook(getAds({source:String(req.query.source??''),status:String(req.query.status??''),search:cleanText(req.query.search,80),runId:String(req.query.runId??''),phoneOnly:exportPhoneOnly(req.query.phoneOnly)})));
 });
 app.get('/api/export.json', (_req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="saved-ads.json"');

@@ -2,6 +2,12 @@ import type { DatabaseSync } from 'node:sqlite';
 
 const mainTables = ['campaigns','projects','runs','leads','captured_ads','captured_ads_runs','captured_ads_members'];
 const companionTables = ['saved_ads','saved_ads_runs','saved_ads_members'];
+export function dataResetStatus(db:DatabaseSync,kind:'main'|'companion') {
+  const tables=kind==='main'?mainTables:companionTables;
+  const runTables=kind==='main'?['runs','captured_ads_runs']:['saved_ads_runs'];
+  return {rows:tables.reduce((sum,table)=>sum+Number((db.prepare(`SELECT COUNT(*) n FROM ${table}`).get() as {n:number}).n),0),
+    active:runTables.reduce((sum,table)=>sum+Number((db.prepare(`SELECT COUNT(*) n FROM ${table} WHERE status IN ('running','queued','paused')`).get() as {n:number}).n),0)};
+}
 export function resetData(db:DatabaseSync,kind:'main'|'companion',raw:Record<string,unknown>) {
   if(raw.confirm!==true||raw.confirmText!=='من تایید میکنم')throw new Error('عبارت «من تایید میکنم» را دقیقاً بنویس.');
   const tables=kind==='main'?mainTables:companionTables;

@@ -7,6 +7,14 @@ afterAll(async()=>{await browser?.close();});
 async function fixture(url:string,html:string):Promise<Page>{const page=await browser.newPage();await page.route('**/*',route=>route.fulfill({status:200,contentType:'text/html; charset=utf-8',body:'<!doctype html><meta charset="utf-8">'+html}));await page.goto(url);return page;}
 const reader=readFileSync('extension/page-reader.js','utf8');const login=readFileSync('extension/login.js','utf8');
 const contactOptions={confirmed:true,basis:'public-business',expectedUrl:'https://divar.ir/v/contact-fixture/1',timeout:1000};
+it('reads contact rows outside main, bidi marks and encoded landline links',async()=>{
+  const page=await fixture(contactOptions.expectedUrl,'<main><h1>نمونه</h1></main><div><span>شماره موبايل:</span><b>\u200e۰۹۱۲۳۴۵۶۷۸۹\u200f</b></div><a href="tel:%2B982112345678">تماس</a>');
+  await page.evaluate(reader);expect(await page.evaluate(()=>(globalThis as any).LeadRadarReader.contactPhones())).toEqual(['02112345678','09123456789']);await page.close();
+});
+it('ignores description tel links and longer numeric identifiers',async()=>{
+  const page=await fixture(contactOptions.expectedUrl,'<main><h1>نمونه</h1><div class="kt-description-row"><a href="tel:09123456789">تماس</a></div><div><span>شماره تماس</span><b>1091234567899</b></div></main>');
+  await page.evaluate(reader);expect(await page.evaluate(()=>(globalThis as any).LeadRadarReader.contactPhones())).toEqual([]);await page.close();
+});
 it('reveals exactly one selected Divar contact on explicit confirmation and never reads description numbers',async()=>{
   const page=await fixture(contactOptions.expectedUrl,'<main><h1>فروشندهٔ نمونه</h1><button id="contact">اطلاعات تماس</button><section><h2>توضیحات</h2><p>عدد نامرتبط ۰۹۹۹۹۹۹۹۹۹۹</p></section><div id="row"></div></main>');
   await page.evaluate(()=>{(globalThis as any).clicks=0;(globalThis as any).document.querySelector('#contact')!.addEventListener('click',()=>{(globalThis as any).clicks++;(globalThis as any).document.querySelector('#row')!.innerHTML='<span>شماره موبایل</span><b>۰۹۱۲۳۴۵۶۷۸۹</b>';});});

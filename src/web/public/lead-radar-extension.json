@@ -1,6 +1,6 @@
 {
-  "version": "2.6.0",
-  "build": "f7fd4d52cc0587c77e253cb91561d24248e38085c1cd4653bc5d81f28f0945a7",
-  "sha256": "f41bf91b73fd7ffdcb7572e35739634a537e58d7d7fcc85b211d47b938aedaa0",
-  "bytes": 24037
+  "version": "2.7.0",
+  "build": "220f5ef6007efa757edcbfccdb5cef92210c92b4f565af966acb70bcb20626ca",
+  "sha256": "9b94cbe6f88917691f2ea06d1cbe5e36f4b92571ba7cffc26295fbd4c26e9392",
+  "bytes": 24295
 }
