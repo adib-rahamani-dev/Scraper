@@ -92,7 +92,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
     if(action==='status'&&(own||panel)){const state=await chrome.storage.local.get(['captureJob','leadRadarToken','leadRadarEndpoint']);const job=state.captureJob;return {connected:Boolean(state.leadRadarToken),endpoint:state.leadRadarEndpoint,job:job?{id:job.id,source:job.source,status:job.status,processed:job.processed,total:job.total,index:job.index,message:job.message,pausedAt:job.pausedAt||'',resumable:job.status==='paused'}:null};}
 if(action==='configure'&&panel){if(typeof message.token!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(message.token))throw new Error('کلید اتصال نامعتبر است.');const endpoint=new URL(sender.url).hostname==='lead-radar-jade.vercel.app'?CLOUD_API:LOCAL_API;const job=await jobGet();if(job&&['running','paused'].includes(job.status))throw new Error('ابتدا اجرای فعال را متوقف کن.');await chrome.storage.local.set({leadRadarToken:message.token,leadRadarEndpoint:endpoint});return {connected:true};}
     if(action==='options'){await chrome.runtime.openOptionsPage();return {};}
-    if(action==='dashboard'){const {leadRadarEndpoint}=await chrome.storage.local.get('leadRadarEndpoint');await chrome.tabs.create({url:leadRadarEndpoint===LOCAL_API?'http://127.0.0.1:5173/':CLOUD_API});return {};}
+    if(action==='dashboard'){const {leadRadarEndpoint}=await chrome.storage.local.get('leadRadarEndpoint');await chrome.tabs.create({url:leadRadarEndpoint===LOCAL_API?LOCAL_API:CLOUD_API});return {};}
     if(action==='ready'&&sender.tab&&source){
       // Login never retries SMS automatically. The phone stays in session storage only until dispatch.
       await dispatchLogin(sender.tab.id);

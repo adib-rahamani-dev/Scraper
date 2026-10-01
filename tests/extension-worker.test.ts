@@ -11,6 +11,9 @@ function worker(initial:Record<string,unknown>={}){
   const settle=async()=>{await new Promise(r=>setTimeout(r,25));};
   return {local,session,requests,chrome,send,listeners,settle,alarms};
 }
+it.each(['http://127.0.0.1:4300','https://lead-radar-jade.vercel.app'])('opens the configured dashboard rather than an obsolete development port: %s',async(endpoint)=>{
+  const w=worker({leadRadarEndpoint:endpoint});expect((await w.send({action:'dashboard'})).error).toBeUndefined();expect(w.chrome.tabs.create).toHaveBeenCalledWith({url:endpoint});
+});
 it('enforces a persisted cooldown after the service worker restarts',async()=>{
   const deadline=Date.now()+30000;
   const w=worker({'capture-next-divar':deadline,captureJob:{id:'run-1',source:'divar',status:'running',stage:'idle',urls:['https://divar.ir/v/item/1'],index:0,processed:0,failed:0,total:1,tabId:null,api:'https://lead-radar-jade.vercel.app'}});
