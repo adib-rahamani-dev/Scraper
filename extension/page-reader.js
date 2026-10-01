@@ -40,9 +40,15 @@
     const parts=[];const add=node=>{if(!visible(node)||node.closest('#lead-radar-extension,#lead-radar-floating-panel,.kt-description-row,[data-testid="post-description"],[itemprop="description"]'))return;const value=clean(node.innerText||node.textContent,3000);if(value)parts.push(value);};
     for(const node of document.querySelectorAll('[role="dialog"],.post-actions,[class*="contact-info"],[class*="contact-modal"],[class*="post-contact"],[data-testid*="contact"]'))add(node);
     for(const link of document.querySelectorAll('a[href^="tel:"]'))if(visible(link)&&!link.closest('.kt-description-row,[data-testid="post-description"],[itemprop="description"]')){try{parts.push(decodeURIComponent(link.getAttribute('href')||''));}catch{parts.push(link.getAttribute('href')||'');}}
+    // The official Sheypoor masked-phone widget becomes a plain numeric span
+    // inside the description. Read only that widget, not the description itself.
+    if(source()==='sheypoor')for(const node of document.querySelectorAll('span.text-main.cursor-pointer.text-heading-4-bolder')){
+      const value=digits(text(node,80));
+      if(visible(node)&&!node.closest('#lead-radar-extension,#lead-radar-floating-panel')&&/^0[1-9]\d{9}$/.test(value.replace(/[\s\-().]/g,'')))parts.push(value);
+    }
     // Divar can render the revealed number as a normal row beside the label "شماره موبایل".
     for(const label of document.querySelectorAll('span,dt,label,div,p,strong')) {
-      if(!visible(label)||!/^(شماره موبایل|شماره همراه|شماره تماس|تلفن تماس|تلفن|mobile number|phone number)$/i.test(labelText(label.textContent)))continue;
+      if(!visible(label)||!/^(شماره موبایل|شماره همراه|شماره تماس(?: تایید شده| تأیید شده)?|تلفن تماس|تلفن|mobile number|phone number)$/i.test(labelText(label.textContent)))continue;
       let row=label.parentElement;
       for(let level=0;row&&level<3;level++,row=row.parentElement){if(row.matches('main,body,[role="main"]')||row.querySelector('h1,h2'))break;add(row);if(/(?:\+98|0098|0|۰)[9۹]/.test(clean(row.innerText,500)))break;}
     }
@@ -60,13 +66,17 @@
     const assertReady=()=>{
       if(url(location.href)!==original)throw new Error('آدرس آگهی تغییر کرد؛ ثبت تماس انجام نشد.');
       if(blocked())throw new Error('کپچا یا محدودیت نمایش داده شد؛ آن را در سایت دستی حل کن و دوباره همین دکمه را بزن.');
+      if(source()==='divar'&&[...document.querySelectorAll('.post-actions')].some(node=>/شماره مخفی شده است/.test(text(node.parentElement,3000))))throw new Error('آگهی‌گذار شماره را مخفی کرده است؛ این آگهی فقط امکان چت دارد و شماره‌ای برای ثبت وجود ندارد.');
       if([...document.querySelectorAll('input[autocomplete="one-time-code"],input[name="otp"],input[name="username"],input[type="tel"]')].some(visible))throw new Error('ورود یا کد تأیید در سایت لازم است؛ شماره ثبت نشد.');
     };
     assertReady();
     let numbers=contactPhones();
     if(numbers.length>1)throw new Error('چند شماره نمایان است؛ برای جلوگیری از ثبت اشتباه چیزی ذخیره نشد.');
     if(numbers.length===1)return numbers[0];
-    const candidates=[...document.querySelectorAll('button,[role="button"],a')].filter(node=>visible(node)&&!node.disabled&&node.getAttribute('aria-disabled')!=='true'&&!node.closest('#lead-radar-extension,#lead-radar-floating-panel')&&(!node.matches('a')||!node.getAttribute('href')||node.getAttribute('href').startsWith('#'))&&/^(اطلاعات\s*تماس|نمایش\s*(?:اطلاعات\s*تماس|شماره(?:\s*تماس)?)|تماس\s*با\s*(?:فروشنده|آگهی[\s‌]*دهنده)|شماره\s*تماس|تماس)$/.test(labelText(node.innerText||node.getAttribute('aria-label'))));
+    let candidates=[...document.querySelectorAll('button,[role="button"],a')].filter(node=>visible(node)&&!node.disabled&&node.getAttribute('aria-disabled')!=='true'&&!node.closest('#lead-radar-extension,#lead-radar-floating-panel')&&(!node.matches('a')||!node.getAttribute('href')||node.getAttribute('href').startsWith('#'))&&/^(اطلاعات\s*تماس|نمایش\s*(?:اطلاعات\s*تماس|شماره(?:\s*تماس)?)|تماس\s*با\s*(?:فروشنده|آگهی[\s‌]*دهنده)|شماره\s*تماس|تماس)$/.test(labelText(node.innerText||node.getAttribute('aria-label'))));
+    // Sheypoor's real contact control is a clickable span, not a button.
+    // Require the masked-phone shape; never click an arbitrary description expander.
+    if(!candidates.length&&source()==='sheypoor')candidates=[...document.querySelectorAll('span')].filter(node=>visible(node)&&!node.closest('#lead-radar-extension,#lead-radar-floating-panel')&&/^09\d{2}[Xx*]{3}\d{4}\s*\(نمایش\s*کامل\)$/.test(digits(labelText(node.innerText))));
     if(candidates.length!==1)throw new Error(candidates.length?'چند دکمهٔ تماس نمایان است؛ بخش تماس را خودت در سایت باز کن.':'دکمهٔ اطلاعات تماس شناخته نشد؛ آن را خودت در سایت باز کن.');
     candidates[0].click(); // One explicitly selected ad, one click, no retry or bulk queue.
     const deadline=Date.now()+Math.min(8000,Math.max(200,Number(timeout)||8000));
@@ -139,5 +149,13 @@
     }
     throw new Error(kind==='search'?(lastError||'نتایج جست‌وجو بارگذاری نشد؛ برگهٔ واقعی سایت را بررسی کن.'):'آگهی به‌طور کامل بارگذاری نشد یا حذف شده است؛ دادهٔ ناقص ثبت نشد.');
   }
-  globalThis.LeadRadarReader={search,detail,context,ready,blocked,visible,text,digits,redact,contactPhones,revealContact};
+  function contactDiagnostics() {
+    if(!url(location.href))throw new Error('ابتدا صفحهٔ یک آگهی را باز کن.');
+    const controls=[...document.querySelectorAll('button,[role="button"],a,span')].filter(node=>visible(node)&&!node.closest('#lead-radar-extension,#lead-radar-floating-panel')&&/تماس|نمایش کامل|شماره|ورود|تأیید|تایید/.test(labelText(node.innerText||node.getAttribute('aria-label')))&&clean(node.innerText,1000).length<150).slice(0,30).map(node=>({tag:node.tagName,label:redact(text(node,150)),className:clean(node.className,150),parentTag:node.parentElement?.tagName,parentClass:clean(node.parentElement?.className,150),parentText:redact(text(node.parentElement,500))}));
+    const notices=[...document.querySelectorAll('[role="alert"],[role="dialog"]')].filter(visible).map(node=>redact(text(node,800))).slice(0,5);
+    const contactArea=[...document.querySelectorAll('.post-actions')].filter(visible).map(node=>redact(text(node.parentElement,3000))).slice(0,2);
+    const numberNodes=[...document.querySelectorAll('span,a,button')].filter(node=>visible(node)&&!node.closest('#lead-radar-extension,#lead-radar-floating-panel')&&/^0[1-9]\d{9}$/.test(digits(labelText(node.innerText)).replace(/[\s\-().]/g,''))).slice(0,10).map(node=>({tag:node.tagName,className:clean(node.className,150),parentTag:node.parentElement?.tagName,parentClass:clean(node.parentElement?.className,150),hasTel:node.getAttribute('href')?.startsWith('tel:')||false}));
+    return {controls,notices,contactArea,numberNodes};
+  }
+  globalThis.LeadRadarReader={search,detail,context,ready,blocked,visible,text,digits,redact,contactPhones,revealContact,contactDiagnostics};
 })();

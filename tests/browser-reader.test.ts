@@ -30,6 +30,24 @@ it('reveals a Sheypoor contact from a single seller-contact control',async()=>{
   await page.evaluate(()=>{(globalThis as any).document.querySelector('#contact')!.addEventListener('click',()=>{(globalThis as any).document.querySelector('#row')!.innerHTML='<a href="tel:09123456789">09123456789</a>';});});
   await page.evaluate(reader);expect(await page.evaluate(options=>(globalThis as any).LeadRadarReader.revealContact(options),{...contactOptions,expectedUrl:url})).toBe('09123456789');await page.close();
 });
+it('reveals the real Sheypoor masked span and reads only the resulting contact widget',async()=>{
+  const url='https://www.sheypoor.com/v/contact-fixture-2.html';
+  const page=await fixture(url,'<main><h1>فروشگاه نمونه</h1><div itemprop="description"><p>عدد نامرتبط 09999999999</p><button>نمایش کامل</button><span id="contact" class="text-main hover:text-orange-1 cursor-pointer text-heading-4-bolder">0912XXX6789(نمایش کامل)</span></div><div><span>شماره تماس تایید شده</span><b>۰۹۱۲XXX۶۷۸۹</b></div></main>');
+  await page.evaluate(()=>{(globalThis as any).clicks=0;(globalThis as any).document.querySelector('#contact').onclick=(event:any)=>{(globalThis as any).clicks++;event.target.innerText='۰۹۱۲۳۴۵۶۷۸۹';};});
+  await page.evaluate(reader);
+  expect(await page.evaluate(options=>(globalThis as any).LeadRadarReader.revealContact(options),{...contactOptions,expectedUrl:url})).toBe('09123456789');
+  // A fresh injection must still recognize the revealed widget during persistence.
+  await page.evaluate(reader);expect(await page.evaluate(()=>(globalThis as any).LeadRadarReader.contactPhones())).toEqual(['09123456789']);
+  expect(await page.evaluate(()=>(globalThis as any).clicks)).toBe(1);await page.close();
+});
+it('does not treat a generic Sheypoor description expander as a contact button',async()=>{
+  const url='https://www.sheypoor.com/v/contact-fixture-3.html';const page=await fixture(url,'<main><h1>نمونه</h1><button>نمایش کامل</button><p>09123456789</p></main>');await page.evaluate(reader);
+  await expect(page.evaluate(options=>(globalThis as any).LeadRadarReader.revealContact(options),{...contactOptions,expectedUrl:url})).rejects.toThrow('شناخته نشد');await page.close();
+});
+it('reports a Divar hidden-number listing immediately instead of pretending extraction succeeded',async()=>{
+  const page=await fixture(contactOptions.expectedUrl,'<main><h1>نمونه</h1><section><div class="post-actions"><button>اطلاعات تماس</button></div><p>شماره مخفی شده است</p><button>پیام در چت</button></section></main>');await page.evaluate(reader);
+  await expect(page.evaluate(options=>(globalThis as any).LeadRadarReader.revealContact(options),contactOptions)).rejects.toThrow('مخفی کرده');await page.close();
+});
 it('rejects missing confirmation, a wrong ad and ambiguous contact buttons before clicking',async()=>{
   const page=await fixture(contactOptions.expectedUrl,'<main><h1>نمونه</h1><button>اطلاعات تماس</button><button>تماس</button></main>');await page.evaluate(reader);
   await page.evaluate(()=>{(globalThis as any).clicks=0;(globalThis as any).document.querySelectorAll('button').forEach((button:any)=>button.addEventListener('click',()=>{(globalThis as any).clicks++;}));});

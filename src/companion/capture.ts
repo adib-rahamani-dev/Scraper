@@ -7,7 +7,8 @@ import { db, saveAd, type AdInput } from './store.js';
 import { runSingleContact } from './jobs.js';
 import { BROWSER_INTERVAL_MS } from '../shared/browser-rate-limit.js';
 
-const readerScript=readFileSync(resolve('extension/page-reader.js'),'utf8');
+// Read the current parser for each operation, without reopening the user's session.
+const readerScript=()=>readFileSync(resolve('extension/page-reader.js'),'utf8');
 type ReadAd={source:BrowserSource;title:string;url:string;topic:string;city:string;region:string;price:string;description:string;category:string;attributes:unknown[];images:string[];published_at:string};
 type Reader={ready:(kind:string,timeout?:number)=>Promise<ReadAd|{source:BrowserSource;context:{topic:string;city:string;region:string;searchUrl:string};items:ReadAd[]}>;detail:(context:Partial<AdInput>)=>ReadAd;contactPhones:()=>string[];revealContact:(options:{confirmed:boolean;basis:string;expectedUrl:string})=>Promise<string>};
 
@@ -15,18 +16,19 @@ type Reader={ready:(kind:string,timeout?:number)=>Promise<ReadAd|{source:Browser
 // no database writes, and no implicit authorization to save a contact.
 export async function visibleContactStatus(source:BrowserSource,page:Page) {
   if(!detailUrl(source,page.url()))throw new Error('ابتدا صفحهٔ یک آگهی را باز کن.');
-  await page.evaluate(readerScript);
+  await page.evaluate(readerScript());
   return page.evaluate(()=>{
     const globals=globalThis as unknown as {LeadRadarReader:Reader & {blocked:()=>boolean;visible:(element:unknown)=>boolean};document:{querySelectorAll:(selector:string)=>Iterable<unknown>}};
     const reader=globals.LeadRadarReader;
     const loginRequired=[...globals.document.querySelectorAll('input[autocomplete="one-time-code"],input[name="otp"]')].some(element=>reader.visible(element));
-    return {visibleCount:reader.contactPhones().length,blocked:reader.blocked(),awaitingCode:loginRequired};
+    const diagnostics=(reader as unknown as {contactDiagnostics:()=>unknown}).contactDiagnostics();
+    return {visibleCount:reader.contactPhones().length,blocked:reader.blocked(),awaitingCode:loginRequired,diagnostics};
   });
 }
 
 export async function revealSelectedContact(source:BrowserSource,page:Page,basis:string,expectedUrl:string){
   if(!detailUrl(source,expectedUrl)||detailUrl(source,page.url())!==detailUrl(source,expectedUrl))throw new Error('برگه با آگهی انتخاب‌شده تطابق ندارد.');
-  await page.evaluate(readerScript);
+  await page.evaluate(readerScript());
   await page.evaluate(async()=>(globalThis as unknown as {LeadRadarReader:Reader}).LeadRadarReader.ready('detail'));
   await page.evaluate(options=>(globalThis as unknown as {LeadRadarReader:Reader}).LeadRadarReader.revealContact(options),{confirmed:true,basis,expectedUrl});
   return captureVisibleContact(source,page,basis);
@@ -44,7 +46,7 @@ export async function requestSelectedContact(source:BrowserSource,basis:string,e
 export async function readCurrentSearch(source:BrowserSource,page:Page) {
   // Official search pages may redirect to a category after DOMContentLoaded.
   // Retry only that navigation race; never retry access restrictions.
-  const read=async()=>{await page.evaluate(readerScript);return await page.evaluate(async()=>await (globalThis as unknown as {LeadRadarReader:Reader}).LeadRadarReader.ready('search',30000));};
+  const read=async()=>{await page.evaluate(readerScript());return await page.evaluate(async()=>await (globalThis as unknown as {LeadRadarReader:Reader}).LeadRadarReader.ready('search',30000));};
   let result;
   try{result=await read();}catch(error){if(!/Execution context was destroyed/.test(String(error)))throw error;await page.waitForLoadState('domcontentloaded',{timeout:15000});result=await read();}
   if(!('items' in result)||result.source!==source)throw new Error('منبع جست‌وجو نامعتبر است.');
@@ -52,7 +54,7 @@ export async function readCurrentSearch(source:BrowserSource,page:Page) {
 }
 export async function captureCurrentDetail(source:BrowserSource,page:Page,manual:Partial<AdInput>={}) {
   if(!detailUrl(source,page.url()))throw new Error('این صفحه آگهی معتبر نیست.');
-  await page.evaluate(readerScript);
+  await page.evaluate(readerScript());
   await page.evaluate(async()=>await (globalThis as unknown as {LeadRadarReader:Reader}).LeadRadarReader.ready('detail'));
   const data=await page.evaluate(ctx=>(globalThis as unknown as {LeadRadarReader:Reader}).LeadRadarReader.detail(ctx),manual);
   const result=saveAd({...data,...captureExtras(data),title:cleanText(manual.title,240)||data.title,topic:cleanText(manual.topic,80)||data.topic,city:data.city||cleanText(manual.city,80),region:data.region||cleanText(manual.region,80),phone:manual.phone??null,contact_basis:manual.contact_basis??'',contact_source:manual.contact_source??'',note:cleanText(manual.note,2000)},{replaceTitle:true,replaceDescription:true,refreshMetadata:true});
@@ -66,7 +68,7 @@ export async function captureCurrentSearch(source:BrowserSource,page:Page) {
 export async function captureVisibleContact(source:BrowserSource,page:Page,basis:string) {
   if(!detailUrl(source,page.url()))throw new Error('ابتدا صفحهٔ یک آگهی را باز کن.');
   if(basis!=='direct-consent'&&basis!=='public-business')throw new Error('مبنای مجاز ارتباط را انتخاب کن.');
-  await page.evaluate(readerScript);
+  await page.evaluate(readerScript());
   const candidates=await page.evaluate(()=>(globalThis as unknown as {LeadRadarReader:Reader}).LeadRadarReader.contactPhones());
   if(candidates.length!==1)throw new Error(candidates.length?'چند شماره نمایان است؛ شمارهٔ درست را دستی ثبت کن.':'شماره‌ای در بخش تماسِ نمایان پیدا نشد. ابتدا اطلاعات تماس را خودت باز کن.');
   const metadata=await captureCurrentDetail(source,page);

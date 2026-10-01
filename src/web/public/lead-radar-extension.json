@@ -1,6 +1,6 @@
 {
-  "version": "2.8.0",
-  "build": "5d0a8e51fb1d4525d1d31d4caeeaeaf3070f608b37c0bcd3671ff8c6b4ac0705",
-  "sha256": "33a32950a481718cec4005b42df86f0b524d657703106881fc028a7d51ce8908",
-  "bytes": 25540
+  "version": "2.8.1",
+  "build": "7df796268a06c16a6b8c1119bd79331289ca6e8542c0316abbb645b0bcc2aba1",
+  "sha256": "057a93e086eef072ea70acd4ee0c8811e155c7cccc41294440e3c85805263369",
+  "bytes": 26220
 }
