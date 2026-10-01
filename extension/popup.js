@@ -1,0 +1,10 @@
+const $=id=>document.getElementById(id);
+const send=async(action,data={})=>{const result=await chrome.runtime.sendMessage({action,...data});if(result.error)throw new Error(result.error);return result.result;};
+function notice(message){$('status').textContent=message;}
+for(const name of ['login','search'])$(name).onsubmit=async event=>{
+  event.preventDefault();const form=event.currentTarget;const data=Object.fromEntries(new FormData(form));const button=form.querySelector('button');button.disabled=true;
+  try{await send(name,data);if(name==='login')form.elements.phone.value='';notice(name==='login'?'فرم سایت باز می‌شود؛ کد را در سایت وارد کن.':'جست‌وجو شروع شد؛ پیشرفت در افزونه و پنل نمایش داده می‌شود.');}catch(error){notice(error.message);}finally{button.disabled=false;}
+};
+for(const name of ['options','dashboard','stop','resume'])$(name).onclick=async()=>{try{await send(name);}catch(error){notice(error.message);}};
+async function refresh(){const state=await chrome.storage.local.get(['captureJob','loginState-divar','loginState-sheypoor','searchError']);const job=state.captureJob;$('progress').textContent=job?`${job.topic} · ${job.processed}/${job.total}\n${job.message}`:'';$('resume').hidden=job?.status!=='paused';$('stop').hidden=!['running','paused'].includes(job?.status);$('login-state').textContent=['divar','sheypoor'].map(s=>state[`loginState-${s}`]?`${s==='divar'?'دیوار':'شیپور'}: ${state[`loginState-${s}`].message}`:'').filter(Boolean).join('\n');if(state.searchError)notice(state.searchError);}
+chrome.storage.onChanged.addListener(()=>void refresh());void refresh();

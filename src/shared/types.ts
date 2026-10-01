@@ -8,7 +8,7 @@ export type SourceCatalogItem = {
   description: string;
   homepage: string;
   supportsCity: boolean;
-  access: 'public-phone' | 'login-may-be-required';
+  access: 'public-phone' | 'manual-only';
 };
 
 export type TopicCampaignResult = {
@@ -70,7 +70,7 @@ export type Run = {
   id: number;
   projectId: number;
   projectName: string;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'completed' | 'skipped' | 'failed' | 'cancelled';
   pagesScanned: number;
   leadsFound: number;
   duplicatesSkipped: number;

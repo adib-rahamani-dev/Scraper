@@ -13,5 +13,5 @@
     "tsBuildInfoFile": "./node_modules/.cache/tsconfig.server.tsbuildinfo",
     "composite": true
   },
-  "include": ["src/server/**/*.ts", "src/shared/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/server/**/*.ts", "src/companion/**/*.ts", "src/shared/**/*.ts", "tests/**/*.ts"]
 }

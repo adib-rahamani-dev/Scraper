@@ -1,12 +1,30 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { get, put } from '@vercel/blob';
 import type { BuiltInSourceId, Campaign, Lead, Project, Run, SourceId } from '../shared/types.js';
+import { initializeCaptureData } from '../shared/capture-data.js';
+import { initializeHistory } from '../shared/history.js';
 
-const databasePath = resolve(process.env.DATABASE_PATH ?? './data/lead-radar.db');
+const isVercel = Boolean(process.env.VERCEL);
+const databasePath = resolve(process.env.DATABASE_PATH ?? (isVercel ? '/tmp/lead-radar.db' : './data/lead-radar.db'));
+let snapshotEtag: string | undefined;
 mkdirSync(dirname(databasePath), { recursive: true });
 
-export const db = new DatabaseSync(databasePath);
+if (isVercel && process.env.BLOB_READ_WRITE_TOKEN) {
+  try {
+    const stored = await get('lead-radar/database.db', { access: 'private', useCache: false });
+    if (stored?.statusCode === 200) {
+      const bytes = new Uint8Array(await new Response(stored.stream).arrayBuffer());
+      writeFileSync(databasePath, bytes);
+      snapshotEtag = stored.blob.etag;
+    }
+  } catch (error) {
+    throw new Error('Could not restore the private database snapshot.',{cause:error});
+  }
+}
+
+export let db = new DatabaseSync(databasePath);
 db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
 
 db.exec(`
@@ -68,13 +86,116 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_leads_project ON leads(project_id);
   CREATE INDEX IF NOT EXISTS idx_leads_created ON leads(discovered_at DESC);
   CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id);
+
+  CREATE TABLE IF NOT EXISTS captured_ads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL CHECK(source IN ('divar', 'sheypoor')),
+    title TEXT NOT NULL,
+    url TEXT NOT NULL UNIQUE,
+    topic TEXT NOT NULL DEFAULT '',
+    city TEXT NOT NULL DEFAULT '',
+    region TEXT NOT NULL DEFAULT '',
+    price TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    phone TEXT,
+    contact_basis TEXT NOT NULL DEFAULT '',
+    contact_source TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'reviewing', 'contacted', 'done')),
+    saved_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_captured_ads_saved ON captured_ads(saved_at DESC);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_captured_ads_phone ON captured_ads(phone) WHERE phone IS NOT NULL;
+
+  CREATE TABLE IF NOT EXISTS extension_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT
+  );
 `);
 
+initializeCaptureData(db, 'captured_ads');
+initializeHistory(db, 'runs');
 const projectColumns = db.prepare('PRAGMA table_info(projects)').all() as unknown as Array<{ name: string }>;
 if (!projectColumns.some((column) => column.name === 'campaign_id')) {
   db.exec('ALTER TABLE projects ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id) ON DELETE SET NULL;');
 }
 db.exec('CREATE INDEX IF NOT EXISTS idx_projects_campaign ON projects(campaign_id);');
+
+// Keep the most useful existing record for each phone, then enforce uniqueness
+// across all projects and campaigns (not just within one project).
+const duplicatesBeforeMigration = Number((db.prepare('SELECT COUNT(*) - COUNT(DISTINCT phone) AS count FROM leads').get() as { count: number }).count);
+const manualFailuresBeforeMigration = Number((db.prepare(`
+  SELECT COUNT(*) AS count FROM runs WHERE status = 'failed' AND pages_scanned = 0 AND leads_found = 0
+    AND project_id IN (SELECT id FROM projects WHERE source IN ('divar', 'sheypoor'))
+`).get() as { count: number }).count);
+db.exec(`
+  DELETE FROM leads WHERE id IN (
+    SELECT id FROM (
+      SELECT id, ROW_NUMBER() OVER (
+        PARTITION BY phone ORDER BY
+          CASE status WHEN 'contacted' THEN 0 WHEN 'qualified' THEN 1 WHEN 'new' THEN 2 ELSE 3 END,
+          score DESC, discovered_at DESC, id DESC
+      ) AS row_number FROM leads
+    ) WHERE row_number > 1
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_phone_unique ON leads(phone);
+  UPDATE runs SET status = 'skipped', progress = 100,
+    message = 'این منبع برای شماره‌های محافظت‌شده نیازمند دسترسی رسمی است؛ بررسی دستی در سایت اصلی'
+  WHERE status = 'failed' AND pages_scanned = 0 AND leads_found = 0
+    AND project_id IN (SELECT id FROM projects WHERE source IN ('divar', 'sheypoor'));
+`);
+
+if (isVercel) {
+  db.exec(`
+    UPDATE runs
+    SET status = 'cancelled', finished_at = COALESCE(finished_at, datetime('now')),
+        message = 'اجرای نیمه‌کاره هنگام انتقال به نسخه آنلاین متوقف شد؛ برای شروع مجدد اجرا کنید'
+    WHERE status IN ('queued', 'running');
+    UPDATE projects SET status = 'ready' WHERE status = 'running';
+  `);
+}
+
+let refreshRequired=false;
+export async function refreshDatabase():Promise<void> {
+  if(!isVercel)return;
+  if(!process.env.BLOB_READ_WRITE_TOKEN)throw new Error('ذخیره‌سازی ابری پروژه تنظیم نشده است.');
+  const stored=await get('lead-radar/database.db',{access:'private',useCache:false,...(snapshotEtag&&!refreshRequired?{ifNoneMatch:snapshotEtag}:{})});
+  if(stored?.statusCode!==200)return;
+  // Each serverless instance reads the latest snapshot; conditional writes prevent lost updates.
+  if(stored.blob.etag===snapshotEtag&&!refreshRequired){await stored.stream.cancel();return;}
+  const bytes=new Uint8Array(await new Response(stored.stream).arrayBuffer());
+  db.exec('PRAGMA wal_checkpoint(TRUNCATE);');db.close();writeFileSync(databasePath,bytes);
+  db=new DatabaseSync(databasePath);db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
+  initializeCaptureData(db,'captured_ads');initializeHistory(db,'runs');snapshotEtag=stored.blob.etag;refreshRequired=false;
+}
+export async function persistDatabase(): Promise<void> {
+  if (!isVercel) return;
+  if (!process.env.BLOB_READ_WRITE_TOKEN) throw new Error('ذخیره‌سازی ابری پروژه تنظیم نشده است.');
+  db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+  try {const result = await put('lead-radar/database.db', readFileSync(databasePath), {
+    access: 'private',
+    allowOverwrite: Boolean(snapshotEtag),
+    ...(snapshotEtag ? { ifMatch: snapshotEtag } : {}),
+    addRandomSuffix: false,
+    contentType: 'application/x-sqlite3',
+  });
+  snapshotEtag = result.etag;
+  }catch(error){refreshRequired=true;throw new Error('ذخیرهٔ ابری انجام نشد؛ اتصال یا تغییر هم‌زمان را بررسی و درخواست را دوباره اجرا کن.',{cause:error});}
+}
+
+if (isVercel && (duplicatesBeforeMigration > 0 || manualFailuresBeforeMigration > 0)) {
+  try {
+    await persistDatabase();
+  } catch (error) {
+    // Another instance may already have saved the same migration. The local
+    // database remains deduplicated; later writes must pass the ETag check.
+    console.warn('Could not persist deduplication migration.', error);
+  }
+}
 
 type ProjectRow = {
   id: number;
@@ -229,7 +350,7 @@ const campaignSelect = `
     (SELECT COUNT(*) FROM projects WHERE projects.campaign_id = campaigns.id) AS project_count,
     (SELECT COUNT(*) FROM runs JOIN projects ON projects.id = runs.project_id WHERE projects.campaign_id = campaigns.id AND runs.status IN ('queued','running')) AS active_runs,
     (SELECT COUNT(*) FROM runs JOIN projects ON projects.id = runs.project_id WHERE projects.campaign_id = campaigns.id AND runs.status = 'queued') AS queued_runs,
-    (SELECT COUNT(*) FROM runs JOIN projects ON projects.id = runs.project_id WHERE projects.campaign_id = campaigns.id AND runs.status = 'completed') AS completed_runs,
+    (SELECT COUNT(*) FROM runs JOIN projects ON projects.id = runs.project_id WHERE projects.campaign_id = campaigns.id AND runs.status IN ('completed','skipped')) AS completed_runs,
     (SELECT COUNT(*) FROM runs JOIN projects ON projects.id = runs.project_id WHERE projects.campaign_id = campaigns.id AND runs.status IN ('failed','cancelled')) AS failed_runs,
     COALESCE((SELECT AVG(runs.progress) FROM runs JOIN projects ON projects.id = runs.project_id WHERE projects.campaign_id = campaigns.id), 0) AS progress,
     COALESCE((SELECT COUNT(DISTINCT leads.phone) FROM leads JOIN projects ON projects.id = leads.project_id WHERE projects.campaign_id = campaigns.id), 0) AS leads_found
@@ -286,6 +407,7 @@ export function listRuns(limit = 30): Run[] {
   return (db.prepare(`
     SELECT runs.*, projects.name AS project_name
     FROM runs JOIN projects ON projects.id = runs.project_id
+    WHERE runs.history_batch = ''
     ORDER BY runs.id DESC LIMIT ?
   `).all(limit) as unknown as RunRow[]).map(mapRun);
 }
@@ -331,13 +453,7 @@ export function listLeads(filters: { projectId?: number; campaignId?: number; se
   }
   const sql = `SELECT * FROM leads ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY discovered_at DESC LIMIT ?`;
   params.push(Math.min(filters.limit ?? 200, 100_000));
-  const rows = (db.prepare(sql).all(...params) as unknown as LeadRow[]).map(mapLead);
-  const seenPhones = new Set<string>();
-  return rows.filter((lead) => {
-    if (seenPhones.has(lead.phone)) return false;
-    seenPhones.add(lead.phone);
-    return true;
-  });
+  return (db.prepare(sql).all(...params) as unknown as LeadRow[]).map(mapLead);
 }
 
 export function updateLeadStatus(id: number, status: Lead['status']): boolean {
@@ -348,21 +464,26 @@ export function dashboard() {
   const scalar = (sql: string) => Number((db.prepare(sql).get() as unknown as { value: number }).value ?? 0);
   const recentLeads = listLeads({ limit: 7 });
   const recentRuns = listRuns(6);
-  const sourceCounts = db.prepare('SELECT source, COUNT(*) AS count FROM leads GROUP BY source ORDER BY count DESC').all() as unknown as Array<{ source: string; count: number }>;
+  const sourceCounts = db.prepare(`SELECT source, COUNT(*) AS count FROM (
+    SELECT source FROM leads UNION ALL SELECT source FROM captured_ads
+  ) GROUP BY source ORDER BY count DESC`).all() as unknown as Array<{ source: string; count: number }>;
   const dailyCounts = db.prepare(`
     WITH RECURSIVE dates(day) AS (
       SELECT date('now', '-6 day') UNION ALL SELECT date(day, '+1 day') FROM dates WHERE day < date('now')
     )
-    SELECT dates.day, COUNT(leads.id) AS count FROM dates
-    LEFT JOIN leads ON date(leads.discovered_at) = dates.day GROUP BY dates.day ORDER BY dates.day
+    SELECT dates.day, COUNT(records.day) AS count FROM dates
+    LEFT JOIN (
+      SELECT date(discovered_at) AS day FROM leads
+      UNION ALL SELECT date(saved_at) AS day FROM captured_ads
+    ) records ON records.day = dates.day GROUP BY dates.day ORDER BY dates.day
   `).all() as unknown as Array<{ day: string; count: number }>;
   return {
     stats: {
-      totalLeads: scalar('SELECT COUNT(*) AS value FROM leads'),
-      todayLeads: scalar("SELECT COUNT(*) AS value FROM leads WHERE date(discovered_at) = date('now')"),
+      totalLeads: scalar('SELECT (SELECT COUNT(*) FROM leads) + (SELECT COUNT(*) FROM captured_ads) AS value'),
+      todayLeads: scalar("SELECT (SELECT COUNT(*) FROM leads WHERE date(discovered_at) = date('now')) + (SELECT COUNT(*) FROM captured_ads WHERE date(saved_at) = date('now')) AS value"),
       activeProjects: scalar("SELECT COUNT(*) AS value FROM projects WHERE status != 'paused'"),
       runningJobs: scalar("SELECT COUNT(*) AS value FROM runs WHERE status IN ('queued','running')"),
-      uniquePhones: scalar('SELECT COUNT(DISTINCT phone) AS value FROM leads'),
+      uniquePhones: scalar('SELECT COUNT(DISTINCT phone) AS value FROM (SELECT phone FROM leads UNION ALL SELECT phone FROM captured_ads WHERE phone IS NOT NULL)'),
       averageScore: Math.round(scalar('SELECT COALESCE(AVG(score), 0) AS value FROM leads')),
     },
     recentLeads,
@@ -370,27 +491,4 @@ export function dashboard() {
     sourceCounts,
     dailyCounts,
   };
-}
-
-export function seedDemo(): void {
-  if (scalarCount('projects') > 0) return;
-  const samples = [
-    createProject({ name: 'خدمات ساختمانی تهران', targetUrl: 'https://example.com/tehran/services', source: 'generic', city: 'تهران', keywords: ['بازسازی', 'کابینت'], maxPages: 30, delayMs: 1500 }),
-    createProject({ name: 'تجهیزات صنعتی', targetUrl: 'https://example.com/industry', source: 'iran-tejarat', city: 'کرج', keywords: ['دستگاه', 'تولید'], maxPages: 40, delayMs: 1800 }),
-  ];
-  const titles = ['طراحی و اجرای کابینت مدرن', 'فروش دستگاه بسته‌بندی', 'خدمات بازسازی ساختمان', 'تولید تجهیزات کارگاهی', 'نصب دوربین مداربسته', 'خدمات برق صنعتی', 'فروش عمده ابزارآلات', 'طراحی دکوراسیون داخلی'];
-  const demoRuns = samples.map((project, index) => {
-    const run = createRun(project.id);
-    updateRun(run.id, { status: 'completed', progress: 100, pagesScanned: 18 + index * 7, leadsFound: 4, startedAt: new Date(Date.now() - 3_600_000).toISOString(), finishedAt: new Date(Date.now() - 3_000_000).toISOString(), message: 'با موفقیت تکمیل شد' });
-    return run;
-  });
-  titles.forEach((title, index) => {
-    const project = samples[index % samples.length]!;
-    const run = demoRuns[index % demoRuns.length]!;
-    insertLead({ projectId: project.id, runId: run.id, source: project.source, title, phone: `09${12 + index}555${String(1100 + index).slice(-4)}`, city: project.city, category: index % 2 ? 'صنعت' : 'خدمات', url: `https://example.com/ad/${index + 1}`, score: 62 + index * 4, isBusiness: index % 3 !== 0 });
-  });
-}
-
-function scalarCount(table: 'projects' | 'leads' | 'runs'): number {
-  return Number((db.prepare(`SELECT COUNT(*) AS value FROM ${table}`).get() as unknown as { value: number }).value);
 }

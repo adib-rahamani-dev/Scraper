@@ -25,7 +25,10 @@ const adapters: SourceAdapter[] = [
     id: 'iran-tejarat', label: 'ایران تجارت',
     matches: (url) => /(^|\.)irantejarat\.com$/i.test(url.hostname),
     isLikelyDetail: (url) => /\/Ads\d+\/Sch\d+\//i.test(url.pathname),
-    shouldFollow: (url) => /\/Ads\d+\/Sch\d+\//i.test(url.pathname) || /^\/k-[^/]+(?:\.html|\/k-\d+\.html)$/i.test(url.pathname),
+    // Search-result cards already expose a public phone and their exact ad URL.
+    // Detail pages also contain unrelated sidebar/footer phone numbers, so only
+    // follow result pagination and never scrape the full detail-page body.
+    shouldFollow: (url) => /^\/k-[^/]+(?:\.html|\/k-\d+\.html)$/i.test(url.pathname),
   },
   {
     id: 'niyazban', label: 'نیازبان',

@@ -1,29 +1,165 @@
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { BuiltInSourceId, Lead, SourceId } from '../shared/types.js';
-import { cancelRun, startRun } from './crawler.js';
-import { createCampaign, createProject, createRun, dashboard, getCampaign, getProject, getRun, listCampaigns, listLeads, listProjects, listRuns, seedDemo, updateLeadStatus } from './db.js';
+import { cancelRun, runNow, startRun } from './crawler.js';
+import { db, createCampaign, createProject, createRun, dashboard, getCampaign, getProject, getRun, listCampaigns, listLeads, listProjects, listRuns, persistDatabase, updateLeadStatus } from './db.js';
 import { validatePublicUrl } from './policy.js';
 import { buildSourceSearchUrl, normalizeCity, normalizeTopic, sourceCatalog } from './source-catalog.js';
+import { capturedCsv, extensionTokenStatus, importCapturedAds, issueExtensionToken, listCapturedAds, revokeExtensionTokens, saveCapturedBatch, saveCapturedContact, updateCapturedAd, validExtensionToken } from './cloud-capture.js';
+import { createCaptureRun, listCaptureRuns, updateCaptureRun } from '../shared/capture-data.js';
+import { adsWorkbook } from './excel-export.js';
+import { refreshDatabase } from './db.js';
+import { deleteHistory, restoreHistory, historyCounts, type HistoryTable } from '../shared/history.js';
 
 const app = express();
 const port = Number(process.env.PORT ?? 4300);
+const isVercel = Boolean(process.env.VERCEL);
 
 app.disable('x-powered-by');
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: ['http://127.0.0.1:5173', 'http://localhost:5173'] }));
-app.use(express.json({ limit: '128kb' }));
+app.use(express.json({ limit: '2mb' }));
+let databaseQueue=Promise.resolve();
+app.use('/api',async(request,response,next)=>{
+  if(!isVercel||request.path==='/health'||request.path==='/auth/login')return next();
+  const previous=databaseQueue;let release!:()=>void;
+  databaseQueue=new Promise<void>(resolve=>{release=resolve;});await previous;
+  let released=false;const done=()=>{if(!released){released=true;release();}};
+  response.once('finish',done);response.once('close',done);
+  try{await refreshDatabase();if(response.destroyed){done();return;}next();}catch{response.status(503).json({error:'پایگاه ابری فعلاً در دسترس نیست؛ دادهٔ خالی جایگزین آن نشده است.'});}
+});
 
 app.get('/api/health', (_request, response) => response.json({ ok: true, service: 'lead-radar', time: new Date().toISOString() }));
+
+const passwordHash = process.env.APP_PASSWORD_SHA256;
+const sessionSecret = process.env.APP_SESSION_SECRET;
+const authConfigured = Boolean(passwordHash && sessionSecret);
+const sessionCookie = 'lead_radar_session';
+const sessionLifetime = 7 * 24 * 60 * 60 * 1000;
+
+function equalHex(left: string, right: string): boolean {
+  if (!/^[0-9a-f]{64}$/i.test(left) || !/^[0-9a-f]{64}$/i.test(right)) return false;
+  return timingSafeEqual(Buffer.from(left, 'hex'), Buffer.from(right, 'hex'));
+}
+
+function isAuthenticated(request: express.Request): boolean {
+  if (!authConfigured) return !isVercel;
+  const raw = request.headers.cookie?.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${sessionCookie}=`))?.slice(sessionCookie.length + 1);
+  if (!raw) return false;
+  const [expiresText, signature] = raw.split('.');
+  const expires = Number(expiresText);
+  if (!expiresText || !signature || !Number.isSafeInteger(expires) || expires <= Date.now()) return false;
+  const expected = createHmac('sha256', sessionSecret!).update(expiresText).digest('hex');
+  return equalHex(signature, expected);
+}
+
+app.post('/api/auth/login', (request, response) => {
+  if (!authConfigured) return response.status(isVercel ? 503 : 200).json(isVercel ? { error: 'ورود مدیریتی هنوز تنظیم نشده است.' } : { ok: true });
+  const submittedHash = createHash('sha256').update(String(request.body?.password ?? '')).digest('hex');
+  if (!equalHex(submittedHash, passwordHash!)) return response.status(401).json({ error: 'رمز ورود نادرست است.' });
+  const expires = Date.now() + sessionLifetime;
+  const signature = createHmac('sha256', sessionSecret!).update(String(expires)).digest('hex');
+  response.cookie(sessionCookie, `${expires}.${signature}`, { httpOnly: true, secure: isVercel, sameSite: 'strict', maxAge: sessionLifetime, path: '/' });
+  response.json({ ok: true });
+});
+
+app.use('/api/extension', (request, response, next) => {
+  if (!validExtensionToken(request.headers.authorization)) return response.status(401).json({ error: 'کلید افزونه معتبر نیست یا منقضی شده است.' });
+  next();
+});
+app.get('/api/extension/ping', (_request, response) => response.json({ ok: true }));
+app.post('/api/extension/runs',async(request,response)=>{
+  try{const run=createCaptureRun(db,'captured_ads',request.body?.source,request.body);await persistDatabase();response.json(run);}
+  catch(error){response.status(400).json({error:error instanceof Error?error.message:'ساخت اجرا ممکن نشد.'});}
+});
+app.patch('/api/extension/runs/:id',async(request,response)=>{
+  try{const run=updateCaptureRun(db,'captured_ads',String(request.params.id),request.body);await persistDatabase();response.json(run);}
+  catch(error){response.status(400).json({error:error instanceof Error?error.message:'ذخیرهٔ وضعیت ممکن نشد.'});}
+});
+app.post('/api/extension/capture', async (request, response) => {
+  try {
+    const result = saveCapturedBatch(request.body?.source, request.body?.items, request.body?.mode,request.body?.runId?String(request.body.runId):undefined);
+    await persistDatabase();
+    response.json(result);
+  } catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : 'ثبت آگهی ممکن نشد.' }); }
+});
+app.post('/api/extension/contact', async (request, response) => {
+  try {
+    const result = saveCapturedContact(request.body?.source, request.body);
+    await persistDatabase();
+    response.json({ id: result.id, phone: result.phone, saved: true });
+  } catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : 'ثبت شماره ممکن نشد.' }); }
+});
+
+app.use('/api', (request, response, next) => {
+  if (isVercel && !authConfigured) return response.status(503).json({ error: 'ورود مدیریتی هنوز تنظیم نشده است.' });
+  if (!isAuthenticated(request)) return response.status(401).json({ error: 'برای دیدن بانک شماره‌ها وارد پنل شوید.' });
+  next();
+});
+
+app.post('/api/auth/logout', (_request, response) => {
+  response.clearCookie(sessionCookie, { path: '/' });
+  response.json({ ok: true });
+});
+
 app.get('/api/dashboard', (_request, response) => response.json(dashboard()));
+for (const [path, table] of [['runs', 'runs'], ['capture-runs', 'captured_ads_runs']] as Array<[string, HistoryTable]>) {
+  app.get(`/api/${path}/history`, (_request, response) => response.json(historyCounts(db, table)));
+  for (const [action, handler] of [['delete', deleteHistory], ['restore', restoreHistory]] as const) {
+    app.post(`/api/${path}/history/${action}`, async (request, response) => {
+      try { const result = handler(db, table, request.body ?? {}); await persistDatabase(); response.json(result); }
+      catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : 'تغییر تاریخچه ممکن نشد.' }); }
+    });
+  }
+}
+app.get('/api/capture-runs',(_request,response)=>response.json(listCaptureRuns(db,'captured_ads')));
+app.get('/api/captured-ads', (request, response) => response.json(listCapturedAds({
+  source: String(request.query.source ?? ''), status: String(request.query.status ?? ''), search: String(request.query.search ?? ''),runId:String(request.query.runId??''),
+})));
+app.post('/api/captured-ads/import', async (request, response) => {
+  if (request.body?.confirm !== true) return response.status(400).json({ error: 'تأیید انتقال داده به ابر لازم است.' });
+  try { const result = importCapturedAds(request.body?.items); await persistDatabase(); response.json(result); }
+  catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : 'انتقال ممکن نشد.' }); }
+});
+app.patch('/api/captured-ads/:id', async (request, response) => {
+  try {
+    const result = updateCapturedAd(Number(request.params.id), String(request.body?.status ?? ''), String(request.body?.note ?? ''));
+    if (!result) return response.status(404).json({ error: 'آگهی پیدا نشد.' });
+    await persistDatabase();
+    response.json(result);
+  } catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : 'به‌روزرسانی ممکن نشد.' }); }
+});
+app.get('/api/captured-ads/export.csv', (request, response) => {
+  const ads = listCapturedAds({ source: String(request.query.source ?? ''), status: String(request.query.status ?? ''), search: String(request.query.search ?? ''),runId:String(request.query.runId??'') });
+  response.setHeader('content-type', 'text/csv; charset=utf-8');
+  response.setHeader('content-disposition', 'attachment; filename="lead-radar-captured.csv"');
+  response.send(capturedCsv(ads));
+});
+app.get('/api/captured-ads/export.xlsx',async(request,response)=>{
+  const ads=listCapturedAds({source:String(request.query.source??''),status:String(request.query.status??''),search:String(request.query.search??''),runId:String(request.query.runId??'')});
+  response.setHeader('content-type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  response.setHeader('content-disposition','attachment; filename="lead-radar-ads.xlsx"');
+  response.send(await adsWorkbook(ads));
+});
+app.get('/api/extension-token', (_request, response) => response.json(extensionTokenStatus()));
+app.post('/api/extension-token', async (request, response) => {
+  if (request.body?.confirm !== true) return response.status(400).json({ error: 'تأیید ساخت کلید لازم است.' });
+  try { const result = issueExtensionToken(); await persistDatabase(); response.json(result); }
+  catch (error) { response.status(409).json({ error: error instanceof Error ? error.message : 'ساخت کلید ممکن نشد.' }); }
+});
+app.delete('/api/extension-token', async (_request, response) => {
+  try { revokeExtensionTokens(); await persistDatabase(); response.json({ ok: true }); }
+  catch (error) { response.status(409).json({ error: error instanceof Error ? error.message : 'لغو کلید ممکن نشد.' }); }
+});
 app.get('/api/projects', (_request, response) => response.json(listProjects()));
 app.get('/api/sources', (_request, response) => response.json(sourceCatalog));
 app.get('/api/campaigns', (_request, response) => response.json(listCampaigns()));
 
-app.post('/api/campaigns/topic', (request, response) => {
+app.post('/api/campaigns/topic', async (request, response) => {
   try {
     const body = request.body as Record<string, unknown>;
     if (body.complianceAccepted !== true) return response.status(400).json({ error: 'پذیرش قوانین استفاده مسئولانه الزامی است.' });
@@ -33,7 +169,7 @@ app.post('/api/campaigns/topic', (request, response) => {
     const requested = Array.isArray(body.sources) ? body.sources.map(String) : sourceCatalog.map((source) => source.id);
     const sourceIds = [...new Set(requested.filter((source): source is BuiltInSourceId => allowed.has(source as BuiltInSourceId)))];
     if (!sourceIds.length) return response.status(400).json({ error: 'حداقل یک منبع باید انتخاب شود.' });
-    const maxPages = Math.max(1, Math.min(40, Number(body.maxPages ?? 40)));
+    const maxPages = Math.max(1, Math.min(isVercel ? 7 : 40, Number(body.maxPages ?? (isVercel ? 7 : 40))));
     const campaign = createCampaign({ topic, city, region: String(body.region ?? '').trim().slice(0, 80), sources: sourceIds });
     const projects = sourceIds.map((sourceId) => {
       const source = sourceCatalog.find((item) => item.id === sourceId)!;
@@ -46,21 +182,25 @@ app.post('/api/campaigns/topic', (request, response) => {
         city: city === 'کل ایران' ? '' : city,
         keywords: [topic],
         maxPages,
-        delayMs: 1750,
+        delayMs: 20_000,
       });
     });
     const runs = projects.map((project) => {
       const run = createRun(project.id);
-      startRun(run.id);
+      if (!isVercel) startRun(run.id);
       return run;
     });
-    response.status(202).json({ topic, city, campaign: getCampaign(campaign.id)!, projects, runs });
+    if (isVercel) {
+      await Promise.all(runs.map((run) => runNow(run.id)));
+      await persistDatabase();
+    }
+    response.status(isVercel ? 200 : 202).json({ topic, city, campaign: getCampaign(campaign.id)!, projects, runs: runs.map((run) => getRun(run.id)!) });
   } catch (error) {
     response.status(400).json({ error: error instanceof Error ? error.message : 'ورودی نامعتبر است.' });
   }
 });
 
-app.post('/api/campaigns/:id/run', (request, response) => {
+app.post('/api/campaigns/:id/run', async (request, response) => {
   const campaign = getCampaign(Number(request.params.id));
   if (!campaign) return response.status(404).json({ error: 'پویش پیدا نشد.' });
   const projects = listProjects().filter((project) => project.campaignId === campaign.id);
@@ -68,13 +208,17 @@ app.post('/api/campaigns/:id/run', (request, response) => {
   if (!runnable.length) return response.status(409).json({ error: 'منابع این پویش همین حالا در حال اجرا هستند.' });
   const runs = runnable.map((project) => {
     const run = createRun(project.id);
-    startRun(run.id);
+    if (!isVercel) startRun(run.id);
     return run;
   });
-  response.status(202).json({ campaign: getCampaign(campaign.id), runs });
+  if (isVercel) {
+    await Promise.all(runs.map((run) => runNow(run.id)));
+    await persistDatabase();
+  }
+  response.status(isVercel ? 200 : 202).json({ campaign: getCampaign(campaign.id), runs: runs.map((run) => getRun(run.id)!) });
 });
 
-app.post('/api/projects', (request, response) => {
+app.post('/api/projects', async (request, response) => {
   try {
     const body = request.body as Record<string, unknown>;
     if (body.complianceAccepted !== true) return response.status(400).json({ error: 'پذیرش قوانین استفاده مسئولانه الزامی است.' });
@@ -84,22 +228,28 @@ app.post('/api/projects', (request, response) => {
     const allowedSources: SourceId[] = ['auto', 'divar', 'sheypoor', 'iran-tejarat', 'niyazban', 'niaz', 'generic'];
     const source = allowedSources.includes(body.source as SourceId) ? body.source as SourceId : 'auto';
     const keywords = Array.isArray(body.keywords) ? body.keywords.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 12) : String(body.keywords ?? '').split(/[،,]/).map((item) => item.trim()).filter(Boolean).slice(0, 12);
-    const maxPages = Math.max(1, Math.min(200, Number(body.maxPages ?? 25)));
-    const delayMs = Math.max(750, Math.min(15_000, Number(body.delayMs ?? 1500)));
+    const maxPages = Math.max(1, Math.min(isVercel ? 7 : 200, Number(body.maxPages ?? (isVercel ? 7 : 25))));
+    const delayMs = Math.max(20_000, Math.min(30_000, Number(body.delayMs ?? 20_000)));
     const project = createProject({ name, targetUrl, source, city: String(body.city ?? '').trim().slice(0, 80), keywords, maxPages, delayMs });
+    await persistDatabase();
     response.status(201).json(project);
   } catch (error) {
     response.status(400).json({ error: error instanceof Error ? error.message : 'ورودی نامعتبر است.' });
   }
 });
 
-app.post('/api/projects/:id/run', (request, response) => {
+app.post('/api/projects/:id/run', async (request, response) => {
   const project = getProject(Number(request.params.id));
   if (!project) return response.status(404).json({ error: 'پروژه پیدا نشد.' });
   if (project.status === 'running') return response.status(409).json({ error: 'این پروژه همین حالا در حال اجراست.' });
   const run = createRun(project.id);
-  startRun(run.id);
-  response.status(202).json(run);
+  if (isVercel) {
+    await runNow(run.id);
+    await persistDatabase();
+  } else {
+    startRun(run.id);
+  }
+  response.status(isVercel ? 200 : 202).json(getRun(run.id));
 });
 
 app.get('/api/runs', (_request, response) => response.json(listRuns()));
@@ -119,11 +269,12 @@ app.get('/api/leads', (request, response) => {
   response.json(listLeads({ projectId, campaignId, search: String(request.query.search ?? ''), status: request.query.status ? String(request.query.status) : undefined, limit: Number(request.query.limit ?? 300) }));
 });
 
-app.patch('/api/leads/:id', (request, response) => {
+app.patch('/api/leads/:id', async (request, response) => {
   const allowed: Lead['status'][] = ['new', 'qualified', 'contacted', 'excluded'];
   const status = request.body?.status as Lead['status'];
   if (!allowed.includes(status)) return response.status(400).json({ error: 'وضعیت نامعتبر است.' });
   const updated = updateLeadStatus(Number(request.params.id), status);
+  if (updated) await persistDatabase();
   response.status(updated ? 200 : 404).json(updated ? { ok: true } : { error: 'سرنخ پیدا نشد.' });
 });
 
@@ -153,11 +304,6 @@ app.get('/api/campaigns/:id/export.csv', (request, response) => {
   sendCsv(response, listLeads({ campaignId: campaign.id, limit: 100_000 }), `lead-radar-campaign-${campaign.id}`);
 });
 
-app.post('/api/demo/seed', (_request, response) => {
-  seedDemo();
-  response.json(dashboard());
-});
-
 const webRoot = resolve('dist/web');
 if (existsSync(webRoot)) {
   app.use(express.static(webRoot));
@@ -169,5 +315,9 @@ app.use((error: Error, _request: express.Request, response: express.Response, _n
   response.status(500).json({ error: 'خطای داخلی سرویس' });
 });
 
-const server = app.listen(port, '127.0.0.1', () => console.log(`Lead Radar API: http://127.0.0.1:${port}`));
-server.ref();
+if (!isVercel) {
+  const server = app.listen(port, '127.0.0.1', () => console.log(`Lead Radar API: http://127.0.0.1:${port}`));
+  server.ref();
+}
+
+export default app;

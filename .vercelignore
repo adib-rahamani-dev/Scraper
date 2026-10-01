@@ -1,0 +1,6 @@
+data/
+.env*
+.vercel/
+node_modules/
+artifacts/
+dist/

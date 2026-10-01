@@ -2,33 +2,41 @@
   "name": "lead-radar",
   "version": "0.1.0",
   "private": true,
+  "overrides": { "exceljs": { "uuid": "^11.1.1" } },
   "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "concurrently -n API,WEB -c cyan,magenta \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "tsx watch src/server/index.ts",
     "dev:web": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "start": "tsx src/server/index.ts",
+    "companion": "tsx src/companion/server.ts",
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@vercel/blob": "^2.8.0",
     "cheerio": "latest",
     "cors": "latest",
+    "exceljs": "^4.4.0",
     "express": "latest",
     "helmet": "latest",
     "lucide-react": "latest",
+    "playwright-core": "^1.63.0",
     "react": "latest",
     "react-dom": "latest"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "latest",
     "@types/cors": "latest",
     "@types/express": "latest",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
     "concurrently": "latest",
     "tsx": "latest",
     "typescript": "latest",

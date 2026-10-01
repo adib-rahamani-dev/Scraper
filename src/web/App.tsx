@@ -7,21 +7,25 @@ import {
   ShieldCheck, Sparkles, Target, TimerReset, Users, X, Zap,
 } from 'lucide-react';
 import type { BuiltInSourceId, Campaign, DashboardData, Lead, Project, Run, SourceCatalogItem, SourceId, TopicCampaignResult } from '../shared/types';
+import CloudCaptureView from './CloudCaptureView';
+import HistoryControls from './HistoryControls';
 
-type View = 'dashboard' | 'projects' | 'leads' | 'runs' | 'exports' | 'settings';
+type View = 'dashboard' | 'projects' | 'leads' | 'captured' | 'runs' | 'exports' | 'settings';
+class AuthRequiredError extends Error {}
 
 const sourceLabel: Record<string, string> = {
   auto: 'تشخیص خودکار', divar: 'دیوار', sheypoor: 'شیپور', 'iran-tejarat': 'ایران تجارت',
   niyazban: 'نیازبان', niaz: 'نیاز', generic: 'سایت عمومی',
 };
 const statusLabel: Record<string, string> = {
-  ready: 'آماده', running: 'در حال اجرا', paused: 'متوقف', queued: 'در صف', completed: 'تکمیل‌شده',
+  ready: 'آماده', running: 'در حال اجرا', paused: 'متوقف', queued: 'در صف', completed: 'تکمیل‌شده', skipped: 'بررسی دستی',
   partial: 'تکمیل ناقص', failed: 'ناموفق', cancelled: 'لغوشده', new: 'جدید', qualified: 'باارزش', contacted: 'پیگیری‌شده', excluded: 'کنارگذاشته',
 };
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...options, headers: { 'content-type': 'application/json', ...options?.headers } });
   const payload = await response.json().catch(() => ({}));
+  if (response.status === 401 && path !== '/api/auth/login') throw new AuthRequiredError(payload.error ?? 'ورود لازم است.');
   if (!response.ok) throw new Error(payload.error ?? 'خطا در ارتباط با سرور');
   return payload as T;
 }
@@ -39,6 +43,7 @@ const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard }>
   { id: 'dashboard', label: 'داشبورد', icon: LayoutDashboard },
   { id: 'projects', label: 'پویش‌های انبوه', icon: Target },
   { id: 'leads', label: 'بانک سرنخ‌ها', icon: Users },
+  { id: 'captured', label: 'آگهی‌های مرورگر', icon: Globe2 },
   { id: 'runs', label: 'تاریخچه اجرا', icon: Activity },
   { id: 'exports', label: 'خروجی و گزارش', icon: FileSpreadsheet },
   { id: 'settings', label: 'تنظیمات', icon: Settings },
@@ -59,6 +64,10 @@ export default function App() {
   const [toast, setToast] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [globalSearch, setGlobalSearch] = useState('');
   const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loginBusy, setLoginBusy] = useState(false);
 
   const loadAll = async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -68,7 +77,8 @@ export default function App() {
       ]);
       setDashboard(d); setProjects(p); setLeads(l); setRuns(r); setSources(s); setCampaigns(c);
     } catch (error) {
-      setToast({ kind: 'error', text: error instanceof Error ? error.message : 'خطا در دریافت اطلاعات' });
+      if (error instanceof AuthRequiredError) setAuthRequired(true);
+      else setToast({ kind: 'error', text: error instanceof Error ? error.message : 'خطا در دریافت اطلاعات' });
     } finally { setLoading(false); }
   };
 
@@ -110,24 +120,16 @@ export default function App() {
     } catch (error) { setToast({ kind: 'error', text: error instanceof Error ? error.message : 'خطا در ذخیره' }); }
   };
 
-  const seedDemo = async () => {
-    try {
-      await api('/api/demo/seed', { method: 'POST', body: '{}' });
-      await loadAll(true);
-      setToast({ kind: 'ok', text: 'داده‌های نمایشی آماده شد.' });
-    } catch (error) { setToast({ kind: 'error', text: error instanceof Error ? error.message : 'خطا' }); }
-  };
-
   const launchCampaign = async (topic: string, city = 'کل ایران', selectedSources?: BuiltInSourceId[]) => {
     try {
       const result = await api<TopicCampaignResult>('/api/campaigns/topic', {
         method: 'POST',
-        body: JSON.stringify({ topic, city, sources: selectedSources, maxPages: 40, complianceAccepted: true }),
+        body: JSON.stringify({ topic, city, sources: selectedSources, maxPages: 7, complianceAccepted: true }),
       });
       setTopicModalOpen(false);
       await loadAll(true);
       setSelectedCampaignId(result.campaign.id);
-      setToast({ kind: 'ok', text: `پویش انبوه «${result.topic}» شروع شد؛ خروجی همه منابع یکجا آماده می‌شود.` });
+      setToast({ kind: 'ok', text: `پویش «${result.topic}» ثبت شد؛ فقط منابع دارای داده عمومی خودکار بررسی می‌شوند.` });
       setView('projects');
     } catch (error) {
       setToast({ kind: 'error', text: error instanceof Error ? error.message : 'ساخت پویش ممکن نشد.' });
@@ -139,13 +141,40 @@ export default function App() {
     try {
       await api(`/api/campaigns/${campaign.id}/run`, { method: 'POST', body: '{}' });
       await loadAll(true);
-      setToast({ kind: 'ok', text: `استخراج واقعی «${campaign.topic}» دوباره روی همه منابع شروع شد.` });
+      setToast({ kind: 'ok', text: `منابع عمومی «${campaign.topic}» دوباره بررسی شدند.` });
     } catch (error) {
       setToast({ kind: 'error', text: error instanceof Error ? error.message : 'اجرای دوباره ممکن نشد.' });
     }
   };
 
   const handleNavigate = (next: View) => { setView(next); setSidebarOpen(false); };
+
+  const login = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoginBusy(true); setLoginError('');
+    try {
+      await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ password: loginPassword }) });
+      setLoginPassword(''); setAuthRequired(false);
+      await loadAll();
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'ورود ممکن نشد.');
+    } finally { setLoginBusy(false); }
+  };
+
+  const logout = async () => {
+    await api('/api/auth/logout', { method: 'POST', body: '{}' });
+    setDashboard(null); setLeads([]); setProjects([]); setRuns([]); setCampaigns([]); setAuthRequired(true);
+  };
+
+  if (authRequired) return <main className="login-page"><form className="login-card" onSubmit={login}>
+    <div className="brand-mark"><Radar size={29} /></div><h1>ورود به رادار لید</h1>
+    <p>بانک شماره‌ها و فایل‌های خروجی فقط پس از ورود مدیریتی نمایش داده می‌شوند.</p>
+    <label htmlFor="panel-password">رمز پنل</label>
+    <input id="panel-password" type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required autoFocus />
+    {loginError && <span className="login-error"><AlertTriangle size={15} /> {loginError}</span>}
+    <button className="primary-button" type="submit" disabled={loginBusy}>{loginBusy ? <LoaderCircle className="spin" size={18} /> : <ShieldCheck size={18} />} ورود امن</button>
+    <small>کد تأیید سایت‌های آگهی را اینجا وارد نکنید.</small>
+  </form></main>;
 
   return (
     <div className="app-shell">
@@ -163,6 +192,7 @@ export default function App() {
         </nav>
         <div className="sidebar-footer">
           <div className="compliance-mini"><ShieldCheck size={18} /><div><b>حالت امن فعال</b><span>رعایت robots.txt و نرخ درخواست</span></div></div>
+          <button className="help-link" onClick={() => void logout()}><ShieldCheck size={18} /> خروج از پنل</button>
           <button className="help-link"><CircleHelp size={18} /> راهنمای شروع سریع</button>
         </div>
       </aside>
@@ -170,7 +200,7 @@ export default function App() {
 
       <main className="main-area">
         <header className="topbar">
-          <button className="icon-btn mobile-menu" onClick={() => setSidebarOpen(true)}><Menu size={21} /></button>
+          <button className="icon-btn mobile-menu" aria-label="بازکردن منو" onClick={() => setSidebarOpen(true)}><Menu size={21} /></button>
           <div className="searchbox"><Search size={19} /><input value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} placeholder="جستجو در سرنخ‌ها، شماره یا شهر…" /></div>
           <div className="topbar-actions">
             <div className="live-pill"><i /> سیستم آماده است</div>
@@ -181,9 +211,10 @@ export default function App() {
 
         <section className="workspace">
           {loading && !dashboard ? <LoadingState /> : <>
-            {view === 'dashboard' && <Dashboard data={dashboard!} projects={projects} campaigns={campaigns} sources={sources} onLaunch={launchCampaign} onAdvanced={() => setModalOpen(true)} onNavigate={setView} onSeed={seedDemo} />}
+            {view === 'dashboard' && <Dashboard data={dashboard!} projects={projects} campaigns={campaigns} sources={sources} onLaunch={launchCampaign} onAdvanced={() => setModalOpen(true)} onNavigate={setView} />}
             {view === 'projects' && <CampaignsView campaigns={campaigns} projects={projects} onNew={() => setTopicModalOpen(true)} onAdvanced={() => setModalOpen(true)} onRetry={retryCampaign} onResults={(campaign) => { setSelectedCampaignId(campaign.id); setView('leads'); }} />}
             {view === 'leads' && <LeadsView leads={filteredLeads} projects={projects} campaigns={campaigns} selectedCampaignId={selectedCampaignId} onCampaignChange={setSelectedCampaignId} onUpdate={updateLead} />}
+            {view === 'captured' && <CloudCaptureView />}
             {view === 'runs' && <RunsView runs={runs} onRefresh={() => void loadAll(true)} />}
             {view === 'exports' && <ExportsView leads={leads} projects={projects} />}
             {view === 'settings' && <SettingsView />}
@@ -202,7 +233,7 @@ function PageHead({ eyebrow, title, description, actions }: { eyebrow: string; t
   return <div className="page-head"><div><p>{eyebrow}</p><h1>{title}</h1><span>{description}</span></div>{actions && <div className="page-actions">{actions}</div>}</div>;
 }
 
-function Dashboard({ data, campaigns, sources, onLaunch, onAdvanced, onNavigate, onSeed }: { data: DashboardData; projects: Project[]; campaigns: Campaign[]; sources: SourceCatalogItem[]; onLaunch: (topic: string) => Promise<void>; onAdvanced: () => void; onNavigate: (view: View) => void; onSeed: () => void }) {
+function Dashboard({ data, campaigns, sources, onLaunch, onAdvanced, onNavigate }: { data: DashboardData; projects: Project[]; campaigns: Campaign[]; sources: SourceCatalogItem[]; onLaunch: (topic: string) => Promise<void>; onAdvanced: () => void; onNavigate: (view: View) => void }) {
   const maxDay = Math.max(1, ...data.dailyCounts.map((item) => item.count));
   const sourceTotal = Math.max(1, data.sourceCounts.reduce((sum, item) => sum + item.count, 0));
   const colors = ['#39d6c5', '#6d8cff', '#ffad5a', '#be7aff'];
@@ -216,7 +247,6 @@ function Dashboard({ data, campaigns, sources, onLaunch, onAdvanced, onNavigate,
     <TopicLauncher sources={sources} onLaunch={onLaunch} />
     {!campaigns.length && <div className="welcome-banner">
       <div className="welcome-icon"><Sparkles size={27} /></div><div><b>اولین پویش آماده است</b><span>فقط موضوع بالا را وارد کن؛ لینک هر منبع و صف اجرا خودکار ساخته می‌شود.</span></div>
-      <div><button className="ghost-button" onClick={onSeed}>نمایش داده نمونه</button></div>
     </div>}
     <div className="stats-grid">
       <StatCard label="کل سرنخ‌ها" value={data.stats.totalLeads} detail={`+${faNumber(data.stats.todayLeads)} امروز`} icon={Users} tone="cyan" />
@@ -269,7 +299,7 @@ function TopicLauncher({ sources, onLaunch }: { sources: SourceCatalogItem[]; on
     <form className="topic-form" onSubmit={submit}>
       <div className="topic-entry"><Search size={21} /><input autoComplete="off" value={topic} onChange={(event) => { setTopic(event.target.value); setError(''); }} placeholder="موضوع کسب‌وکار را بنویس…" maxLength={80} autoFocus /><button type="submit" disabled={busy}>{busy ? <LoaderCircle className="spin" size={20} /> : <Zap size={20} />} روشن‌کردن رادار</button></div>
       {error && <span className="topic-error"><AlertTriangle size={14} /> {error}</span>}
-      <div className="market-sources"><small>خودکار در:</small>{sources.map((source) => <span className={`market-source source-${source.id}`} key={source.id}><i />{source.label}</span>)}<em><ShieldCheck size={13} /> فقط داده عمومی</em></div>
+    <div className="market-sources"><small>منابع:</small>{sources.map((source) => <span className={`market-source source-${source.id}`} key={source.id}><i />{source.label} {source.access === 'manual-only' ? '· دستی' : '· خودکار'}</span>)}<em><ShieldCheck size={13} /> فقط داده عمومی</em></div>
     </form>
   </section>;
 }
@@ -291,8 +321,8 @@ function CampaignsView({ campaigns, projects, onNew, onAdvanced, onRetry, onResu
       return <article className="campaign-card" key={campaign.id}>
         <div className="campaign-card-head"><div className="campaign-topic-icon">{active ? <LoaderCircle className="spin" size={24} /> : <Radar size={24} />}</div><div><span>پویش #{faNumber(campaign.id)}</span><h3>{campaign.topic}</h3></div><em className={`campaign-status ${campaign.status}`}>{statusLabel[campaign.status]}</em></div>
         <div className="campaign-sources">{campaign.sources.map((source) => <span className={`source-${source}`} key={source}><i />{sourceLabel[source]}</span>)}</div>
-        <div className="live-source-links"><b><Globe2 size={15} /> مشاهده سایت واقعی:</b>{sourceProjects.map((project) => <a href={project.targetUrl} target="_blank" rel="noreferrer" key={project.id}><span>{sourceLabel[project.source]}</span><small>{project.source === 'iran-tejarat' ? 'شماره عمومی' : 'ممکن است ورود بخواهد'}</small><ExternalLink size={14} /></a>)}</div>
-        <div className="campaign-metrics"><div><small>نتیجه تجمیعی</small><b>{faNumber(campaign.leadsFound)} <em>سرنخ</em></b></div><div><small>منابع خودکار</small><b>{faNumber(campaign.projectCount)} <em>سایت</em></b></div><div><small>محدوده</small><b>{campaign.city || 'کل ایران'}</b></div><div><small>زمان ساخت</small><b>{faDate(campaign.createdAt)}</b></div></div>
+        <div className="live-source-links"><b><Globe2 size={15} /> مشاهده سایت واقعی:</b>{sourceProjects.map((project) => <a href={project.targetUrl} target="_blank" rel="noreferrer" key={project.id}><span>{sourceLabel[project.source]}</span><small>{project.source === 'divar' || project.source === 'sheypoor' ? 'بررسی دستی در سایت اصلی' : 'داده عمومی · خزش مجاز'}</small><ExternalLink size={14} /></a>)}</div>
+        <div className="campaign-metrics"><div><small>نتیجه تجمیعی</small><b>{faNumber(campaign.leadsFound)} <em>سرنخ</em></b></div><div><small>منابع ثبت‌شده</small><b>{faNumber(campaign.projectCount)} <em>سایت</em></b></div><div><small>محدوده</small><b>{campaign.city || 'کل ایران'}</b></div><div><small>زمان ساخت</small><b>{faDate(campaign.createdAt)}</b></div></div>
         <div className="campaign-progress"><div><span>{active ? 'در حال جمع‌آوری از همه منابع…' : 'پردازش منابع پایان یافت'}</span><b>{faNumber(campaign.progress)}٪</b></div><i><span style={{ width: `${campaign.progress}%` }} /></i></div>
         <div className="campaign-actions-row">{!active && <button className="ghost-button" onClick={() => onRetry(campaign)}><RefreshCw size={17} /> اجرای دوباره همه منابع</button>}<button className="ghost-button" onClick={() => onResults(campaign)}><Eye size={17} /> مشاهده همه نتایج</button><a className="primary-button" href={`/api/campaigns/${campaign.id}/export.csv`}><Download size={17} /> خروجی یکجای CSV</a></div>
       </article>;
@@ -326,8 +356,11 @@ function LeadsTable({ leads, compact = false, onUpdate }: { leads: Lead[]; compa
 }
 
 function RunsView({ runs, onRefresh }: { runs: Run[]; onRefresh: () => void }) {
+  const [selectedId, setSelectedId] = useState('');
+  const selected = runs.find(run => String(run.id) === selectedId);
   return <>
     <PageHead eyebrow="مانیتورینگ" title="تاریخچه اجرا" description="پیشرفت زنده، تعداد صفحات و نتیجه هر اجرای خزنده." actions={<button className="ghost-button" onClick={onRefresh}><RefreshCw size={17} /> به‌روزرسانی</button>} />
+    <section className="panel history-panel"><label>انتخاب اجرا برای حذف<select aria-label="انتخاب اجرا برای حذف" value={selectedId} onChange={event => setSelectedId(event.target.value)}><option value="">یک اجرا را انتخاب کن</option>{runs.map(run => <option value={run.id} key={run.id}>{run.projectName} · #{faNumber(run.id)} · {statusLabel[run.status]}</option>)}</select></label><HistoryControls path="/api/runs" selectedId={selected?.id} selectedStatus={selected?.status} refreshKey={runs.map(run => `${run.id}:${run.status}`).join(',')} onChanged={() => { setSelectedId(''); onRefresh(); }} /></section>
     <section className="panel run-history">{runs.length ? runs.map((run) => <div className="run-history-row" key={run.id}>
       <div className={`run-state ${run.status}`}>{run.status === 'running' ? <LoaderCircle className="spin" /> : run.status === 'completed' ? <Check /> : run.status === 'failed' ? <AlertTriangle /> : <TimerReset />}</div>
       <div className="run-main"><div><b>{run.projectName}</b><span>اجرای #{faNumber(run.id)} • {faDate(run.startedAt)}</span></div><p>{run.message}</p><div className="progress"><i style={{ width: `${run.progress}%` }} /></div></div>
@@ -352,8 +385,8 @@ function ExportsView({ leads, projects }: { leads: Lead[]; projects: Project[] }
 function SettingsView() {
   return <>
     <PageHead eyebrow="کنترل سیستم" title="تنظیمات و سیاست‌ها" description="مرزهای فنی نسخه محلی و اصول استفاده مسئولانه." />
-    <div className="settings-grid"><section className="panel settings-section"><PanelTitle title="سیاست خزش" subtitle="به‌صورت پیش‌فرض فعال" icon={ShieldCheck} /><div className="setting-row"><div><b>رعایت robots.txt</b><span>مسیرهای ممنوع به‌صورت خودکار کنار گذاشته می‌شوند.</span></div><button className="toggle on" aria-label="فعال"><i /></button></div><div className="setting-row"><div><b>محدودیت سرعت</b><span>حداقل فاصله درخواست‌ها ۷۵۰ میلی‌ثانیه است.</span></div><button className="toggle on" aria-label="فعال"><i /></button></div><div className="setting-row"><div><b>حفاظت شبکه داخلی</b><span>آدرس‌های خصوصی و سرویس‌های محلی قابل دسترس نیستند.</span></div><button className="toggle on" aria-label="فعال"><i /></button></div></section>
-      <section className="panel settings-section"><PanelTitle title="محدوده داده" subtitle="اطلاعات تماس عمومی" icon={Phone} /><div className="notice"><AlertTriangle size={20} /><p><b>شماره محافظت‌شده استخراج نمی‌شود.</b><br />ورود، کپچا، API خصوصی و دکمه‌های نمایش شماره دور زده نمی‌شوند. فقط شماره‌ای که در HTML عمومی صفحه دیده شود ذخیره خواهد شد.</p></div><div className="info-line"><span>نسخه موتور</span><b>۰.۱.۰</b></div><div className="info-line"><span>پایگاه داده</span><b>SQLite محلی</b></div><div className="info-line"><span>حالت اجرا</span><b>تک‌کاربره</b></div></section></div>
+    <div className="settings-grid"><section className="panel settings-section"><PanelTitle title="سیاست خزش" subtitle="به‌صورت پیش‌فرض فعال" icon={ShieldCheck} /><div className="setting-row"><div><b>رعایت robots.txt</b><span>اگر قوانین منبع در دسترس نباشد، خزش متوقف می‌شود.</span></div><button className="toggle on" aria-label="فعال"><i /></button></div><div className="setting-row"><div><b>محدودیت سرعت</b><span>فاصله درخواست‌ها دست‌کم ۲۰ ثانیه به‌علاوه وقفه تصادفی است؛ محدودیت دسترسی باعث توقف می‌شود.</span></div><button className="toggle on" aria-label="فعال"><i /></button></div><div className="setting-row"><div><b>حفاظت شبکه داخلی</b><span>آدرس‌های خصوصی و سرویس‌های محلی قابل دسترس نیستند.</span></div><button className="toggle on" aria-label="فعال"><i /></button></div></section>
+      <section className="panel settings-section"><PanelTitle title="محدوده داده" subtitle="اطلاعات تماس عمومی" icon={Phone} /><div className="notice"><AlertTriangle size={20} /><p><b>شماره محافظت‌شده استخراج نمی‌شود.</b><br />دیوار و شیپور فقط برای بازکردن دستی سایت اصلی نمایش داده می‌شوند. کد تأیید فقط باید در سایت اصلی وارد شود؛ این برنامه آن را دریافت یا ذخیره نمی‌کند. ورود، کپچا و API خصوصی دور زده نمی‌شوند.</p></div><div className="info-line"><span>نسخه موتور</span><b>۰.۲.۰</b></div><div className="info-line"><span>پایگاه داده</span><b>SQLite / Blob خصوصی</b></div><div className="info-line"><span>حالت اجرا</span><b>تک‌کاربره</b></div></section></div>
   </>;
 }
 
@@ -374,7 +407,7 @@ function TopicCampaignModal({ sources, onClose, onAdvanced, onLaunch }: { source
     <div className="form-body">
       {error && <div className="form-error"><AlertTriangle size={17} />{error}</div>}
       <label className="topic-modal-input"><span>موضوع مشتری‌یابی <em>*</em></span><div><Search size={21} /><input required autoFocus minLength={2} maxLength={80} value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="مثلاً دستگاه بسته‌بندی" /></div><small>همین یک فیلد کافی است؛ بقیه گزینه‌ها آماده‌اند.</small></label>
-      <div className="auto-discovery-card"><div><Globe2 size={22} /><span><b>کشف خودکار منابع</b><small>رادار همه سایت‌های پشتیبانی‌شده را بدون انتخاب دستی بررسی می‌کند.</small></span></div><div className="auto-source-row">{sources.map((source) => <span className={`source-${source.id}`} key={source.id}><i />{source.label}</span>)}</div></div>
+      <div className="auto-discovery-card"><div><Globe2 size={22} /><span><b>منابع بازار ایران</b><small>شماره‌های عمومی خودکار بررسی می‌شوند؛ دیوار و شیپور لینک بررسی دستی دارند.</small></span></div><div className="auto-source-row">{sources.map((source) => <span className={`source-${source.id}`} key={source.id}><i />{source.label} · {source.access === 'manual-only' ? 'دستی' : 'خودکار'}</span>)}</div></div>
       <div className="future-filter-note"><MapPin size={18} /><div><b>فیلتر شهر و منطقه</b><span>زیرساخت آن آماده شد و در نسخه بعد به همین پویش انبوه اضافه می‌شود.</span></div><em>به‌زودی</em></div>
       <div className="campaign-policy"><ShieldCheck size={18} /><p>با شروع پویش، استفاده مسئولانه را می‌پذیری: فقط اطلاعات تماسِ عمومی ذخیره می‌شود و ورود، کپچا یا شماره محافظت‌شده دور زده نمی‌شود.</p></div>
     </div>
@@ -383,7 +416,7 @@ function TopicCampaignModal({ sources, onClose, onAdvanced, onLaunch }: { source
 }
 
 function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [form, setForm] = useState({ name: '', targetUrl: '', source: 'auto' as SourceId, city: '', keywords: '', maxPages: 25, delayMs: 1500, complianceAccepted: false });
+  const [form, setForm] = useState({ name: '', targetUrl: '', source: 'auto' as SourceId, city: '', keywords: '', maxPages: 7, delayMs: 20_000, complianceAccepted: false });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const update = (key: keyof typeof form, value: string | number | boolean) => setForm((current) => ({ ...current, [key]: value }));
@@ -401,7 +434,7 @@ function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreate
       <label><span>لینک هدف <em>*</em></span><div className="input-icon"><Globe2 size={17} /><input required dir="ltr" type="url" value={form.targetUrl} onChange={(e) => update('targetUrl', e.target.value)} placeholder="https://example.com/category/..." /></div><small>صفحه دسته‌بندی، جستجو یا آگهی عمومی را وارد کن.</small></label>
       <div className="form-row"><label><span>منبع</span><div className="select-wrap"><select value={form.source} onChange={(e) => update('source', e.target.value)}><option value="auto">تشخیص خودکار</option><option value="divar">دیوار</option><option value="sheypoor">شیپور</option><option value="iran-tejarat">ایران تجارت</option><option value="niyazban">نیازبان</option><option value="generic">سایت عمومی</option></select><ChevronDown size={16} /></div></label><label><span>شهر هدف</span><input value={form.city} onChange={(e) => update('city', e.target.value)} placeholder="مثلاً تهران" /></label></div>
       <label><span>کلیدواژه‌ها</span><input value={form.keywords} onChange={(e) => update('keywords', e.target.value)} placeholder="کابینت، بازسازی، تولید" /><small>با ویرگول جدا کن؛ برای امتیازدهی کیفیت استفاده می‌شود.</small></label>
-      <div className="form-row"><label><span>حداکثر صفحات</span><input type="number" min="1" max="200" value={form.maxPages} onChange={(e) => update('maxPages', Number(e.target.value))} /></label><label><span>فاصله درخواست (ms)</span><input type="number" min="750" max="15000" step="250" value={form.delayMs} onChange={(e) => update('delayMs', Number(e.target.value))} /></label></div>
+      <div className="form-row"><label><span>حداکثر صفحات (آنلاین: ۷)</span><input type="number" min="1" max="7" value={form.maxPages} onChange={(e) => update('maxPages', Number(e.target.value))} /></label><label><span>حداقل فاصله درخواست (ms)</span><input type="number" min="20000" max="30000" step="1000" value={form.delayMs} onChange={(e) => update('delayMs', Number(e.target.value))} /><small>۱۰ ثانیه وقفه تصادفی برای کاهش فشار به منبع افزوده می‌شود.</small></label></div>
       <label className="check-label"><input type="checkbox" checked={form.complianceAccepted} onChange={(e) => update('complianceAccepted', e.target.checked)} /><span><Check size={14} /></span><p>تأیید می‌کنم فقط اطلاعات تماس عمومی و مجاز را برای ارتباط مسئولانه جمع‌آوری می‌کنم و قوانین منبع را رعایت خواهم کرد.</p></label>
     </div>
     <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>انصراف</button><button type="submit" className="primary-button" disabled={saving}>{saving ? <><LoaderCircle className="spin" size={18} /> در حال ساخت…</> : <><Sparkles size={18} /> ساخت پروژه</>}</button></div>

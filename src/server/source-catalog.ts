@@ -7,7 +7,7 @@ export const sourceCatalog: SourceCatalogItem[] = [
     description: 'آگهی‌های محلی کالا، خدمات و کسب‌وکار',
     homepage: 'https://divar.ir',
     supportsCity: true,
-    access: 'login-may-be-required',
+    access: 'manual-only',
   },
   {
     id: 'sheypoor',
@@ -15,7 +15,7 @@ export const sourceCatalog: SourceCatalogItem[] = [
     description: 'بازار آگهی‌های شهری و خدمات محلی',
     homepage: 'https://www.sheypoor.com',
     supportsCity: true,
-    access: 'login-may-be-required',
+    access: 'manual-only',
   },
   {
     id: 'iran-tejarat',
@@ -31,7 +31,7 @@ export const sourceCatalog: SourceCatalogItem[] = [
     description: 'آگهی‌های عمومی و نیازمندی‌های ایران',
     homepage: 'https://niyazban.ir',
     supportsCity: false,
-    access: 'login-may-be-required',
+    access: 'public-phone',
   },
 ];
 
