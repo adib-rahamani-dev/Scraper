@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Download, Play, Radar, Phone, Square } from 'lucide-react';
+import { Download, Play, Radar, Phone, Square, Activity, CircleCheck, TriangleAlert } from 'lucide-react';
 import CloudCaptureView from './CloudCaptureView';
 import DataResetControls from './DataResetControls';
 import CaptureAlerts from './CaptureAlerts';
 import type { PausedCaptureRun } from '../shared/capture-alerts';
 import { browserCommand } from './browser-bridge';
 import type { Lead } from '../shared/types';
+import './radar-workspace.css';
 
 type Runtime={local:boolean};
 type Run=PausedCaptureRun;
@@ -24,19 +25,27 @@ export default function RadarWorkspace({onPublicSearch,onChanged,publicLeads,cam
   const [progress,setProgress]=useState('');const [version,setVersion]=useState(0);
   const [includePublic,setIncludePublic]=useState(true);const [publicVisible,setPublicVisible]=useState(false);
   const [runs,setRuns]=useState<Run[]>([]);
+  const [resultView,setResultView]=useState('all');
+  const [extensionVersion,setExtensionVersion]=useState('');
+  const [lastSync,setLastSync]=useState<string>('');
+  const latestRuns=['divar','sheypoor'].map(site=>runs.find(run=>run.source===site)).filter(Boolean) as Run[];
+  const activeRuns=latestRuns.filter(run=>run.status==='running');
+  const pausedRuns=latestRuns.filter(run=>run.status==='paused');
+  const visibleSources=source==='all'?['divar','sheypoor']:[source];
   const publicContacts=publicLeads.filter(lead=>Boolean(lead.phone?.trim()));
   const cityLabel=cities.find(c=>c[0]===city)?.[1]||'کل ایران';
   useEffect(()=>{void api<Runtime>('/api/runtime').then(value=>{setRuntime(value);if(!value.local)setSource('divar');}).catch(error=>setMessage(error.message));},[]);
+  useEffect(()=>{void fetch('/lead-radar-extension.json',{cache:'no-store'}).then(response=>response.json()).then(value=>{if(/^\d+(?:\.\d+){1,3}$/.test(value.version))setExtensionVersion(value.version);}).catch(()=>{});},[]);
   useEffect(()=>{
     if(!runtime)return;let alive=true;
     const refresh=async()=>{
       try{
         if(runtime.local){
           await api('/api/companion/state');const history=await api<Run[]>('/api/companion/capture-runs');
-          if(alive){setConnected(true);setRuns(history);const latest=['divar','sheypoor'].map(site=>history.find(run=>run.source===site)).filter(Boolean) as Run[];setProgress(latest.map(run=>`${run.source==='divar'?'دیوار':'شیپور'}: ${run.message}`).join(' · ')||'آمادهٔ جست‌وجو');}
+          if(alive){setConnected(true);setLastSync(new Date().toLocaleTimeString('fa-IR'));setRuns(history);const latest=['divar','sheypoor'].map(site=>history.find(run=>run.source===site)).filter(Boolean) as Run[];setProgress(latest.map(run=>`${run.source==='divar'?'دیوار':'شیپور'}: ${run.message}`).join(' · ')||'آمادهٔ جست‌وجو');}
         }else{
           const state=await browserCommand<{connected:boolean;job?:Run}>('status');
-          if(alive){setConnected(state.connected);setRuns(state.job?[state.job]:[]);setProgress(state.job?.message||'آمادهٔ جست‌وجو');}
+          if(alive){setConnected(state.connected);setLastSync(new Date().toLocaleTimeString('fa-IR'));setRuns(state.job?[state.job]:[]);setProgress(state.job?.message||'آمادهٔ جست‌وجو');}
         }
       }catch{if(alive)setConnected(false);}
     };
@@ -89,6 +98,7 @@ export default function RadarWorkspace({onPublicSearch,onChanged,publicLeads,cam
       <div className="radar-kicker"><Radar size={18}/> رادار یکپارچهٔ بازار ایران <span className={connected?'connected':''}>{connected?'مرورگر متصل':'نیازمند اتصال مرورگر'}</span></div>
       <h1>یک موضوع. چند منبع. آگهی‌ها و تماس‌های ثبت‌شده.</h1>
       <p>حالت محلی: دو مرورگر مستقل برای دیوار و شیپور، همراه با پویش منابع عمومی؛ هیچ شماره‌ای حدس زده نمی‌شود.</p>
+      <div className="radar-overview" aria-label="وضعیت لحظه‌ای منابع"><div><Activity size={18}/><strong>{activeRuns.length.toLocaleString('fa-IR')}</strong><span>صف در حال اجرا</span></div><div className={pausedRuns.length?'needs-action':''}><TriangleAlert size={18}/><strong>{pausedRuns.length.toLocaleString('fa-IR')}</strong><span>صف منتظر اقدام</span></div><div><CircleCheck size={18}/><strong>{latestRuns.reduce((sum,run)=>sum+(Number(run.processed)||0),0).toLocaleString('fa-IR')}</strong><span>بررسی در آخرین صف‌ها</span></div><div><Radar size={18}/><strong>{runtime?.local?'محلی':'افزونه'}</strong><span>{connected&&lastSync?`آخرین اتصال ${lastSync}`:'در انتظار اتصال'}</span></div></div>
       <form className="radar-launch" onSubmit={event=>{event.preventDefault();void perform(launch);}}>
         <label>موضوع<input aria-label="موضوع" value={topic} onChange={event=>setTopic(event.target.value)} required minLength={2} placeholder="مثلاً موبایل، دوچرخه یا کابینت"/></label>
         <label>شهر<select aria-label="شهر" value={city} onChange={event=>setCity(event.target.value)}>{cities.map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label>
@@ -96,15 +106,17 @@ export default function RadarWorkspace({onPublicSearch,onChanged,publicLeads,cam
         <button type="submit" className="primary-button" disabled={busy||!runtime}><Play size={18}/> {busy?'در حال شروع…':'جست‌وجو و استخراج'}</button>
         <details><summary>فیلترهای بیشتر</summary><label>تعداد آگهی در هر سایت<input aria-label="تعداد آگهی در هر سایت" type="number" min={1} max={20} value={limit} onChange={event=>setLimit(Number(event.target.value))}/></label><p>سقف هر اجرا ۲۰ آگهی؛ حداقل فاصلهٔ بازکردن آگهی‌ها در هر سایت ۳۰ ثانیه، حتی بین اجراها. کپچا باعث توقف می‌شود.</p>{source!=='all'&&<label>لینک جست‌وجوی فیلترشده<input type="url" value={url} onChange={event=>setUrl(event.target.value)} placeholder="https://divar.ir/s/..."/></label>}</details>
       </form>
+      <div className="radar-presets"><span>موضوع‌های سریع</span>{['لوازم تحریر','کیف مدرسه','اسباب بازی','موبایل'].map(value=><button type="button" key={value} disabled={busy} onClick={()=>setTopic(value)}>{value}</button>)}</div>
       {source!=='public'&&<label className="phone-only-control"><input type="checkbox" checked={includePublic} disabled={busy} onChange={event=>setIncludePublic(event.target.checked)}/> منابع عمومی رادار هم هم‌زمان فعال شوند</label>}
       <div className="radar-progress" role="status"><span>{progress||'در حال بررسی اتصال…'}</span><button className="ghost-button" onClick={()=>void stop()}><Square size={14}/> توقف همه</button></div>
       {message&&<p className="radar-message" role="status">{message}</p>}
       <CaptureAlerts runs={runs} busy={busy} onFocus={run=>void perform(async()=>{if(runtime?.local)await api(`/api/companion/capture-runs/${run.id}/focus`,{});else await browserCommand('focus');})} onResume={run=>void perform(async()=>{if(runtime?.local)await api(`/api/companion/capture-runs/${run.id}/resume`,{});else await browserCommand('resume');setMessage('ادامه از محل توقف درخواست شد؛ اگر کپچا باقی مانده باشد صف دوباره متوقف می‌شود.');})}/>
     </section>
     <details className="panel radar-login"><summary><Phone size={16}/> ورود به دیوار و شیپور</summary><form onSubmit={event=>{event.preventDefault();void perform(login);}}><label>شمارهٔ همراه خودت<input type="tel" inputMode="tel" value={phone} onChange={event=>setPhone(event.target.value)} required autoComplete="tel" placeholder="0912…"/></label><button className="primary-button" disabled={busy||!runtime}>آماده‌کردن ورود هر دو سایت</button><p>کد پیامکی را در سایت اصلی وارد کن. نمایش و ثبت تماس یک آگهی همچنان نیازمند اقدام و تأیید خودت است.</p></form></details>
-    {!connected&&<div className="radar-connect panel"><p>{runtime?.local?'همراه محلی را با npm run companion اجرا کن.':'افزونهٔ ۲.۶ را نصب کن و صفحه را تازه کن. اجرای هم‌زمان دو مرورگر فقط در همراه محلی است؛ افزونه فعلاً یک صف مرورگر دارد.'}</p><a className="primary-button" href="/lead-radar-extension.zip" download><Download size={16}/> دانلود افزونه</a></div>}
+    <div className="radar-connect panel"><div><strong>افزونهٔ مرورگر {extensionVersion&&<span dir="ltr">{extensionVersion}</span>}</strong><p>{!connected?(runtime?.local?'همراه محلی را با npm run companion اجرا کن.':'افزونه را نصب یا Reload کن و صفحه را تازه کن.'):runtime?.local?'همراه محلی متصل است؛ برای استفاده از Vercel افزونه را در مرورگر شخصی نصب کن.':'افزونه به پنل متصل است.'} برای به‌روزرسانی دستی، فایل‌های بسته را در همان پوشه جایگزین کن و در chrome://extensions دکمهٔ Reload را بزن؛ سپس برگه‌ها را تازه کن.</p><small>شمارهٔ بالا نسخهٔ بستهٔ دانلود است، نه تأیید نسخهٔ نصب‌شده؛ نسخهٔ نصب‌شده در پنجرهٔ افزونه نمایش داده می‌شود.</small></div><a className="primary-button" href="/lead-radar-extension.zip" download><Download size={16}/> دانلود آخرین افزونه</a></div>
     {runtime&&<section className="panel radar-cleanup"><h2>مدیریت بانک و حذف همهٔ اطلاعات</h2><DataResetControls localMode={runtime.local} onChanged={()=>{setVersion(v=>v+1);onChanged();}}/></section>}
-    {source!=='public'&&runtime&&(source==='all'?['divar','sheypoor']:[source]).map(site=><section className="source-workspace" key={site}><h2>{site==='divar'?'دیوار':'شیپور'} · آگهی‌ها و اطلاعات تماس</h2><CloudCaptureView key={`${runtime.local}:${version}:${site}`} localMode={runtime.local} sourceFilter={site}/></section>)}
+    {source==='all'&&<nav className="radar-result-tabs" aria-label="نمایش نتایج منابع">{[['all','هر دو سایت'],['divar','فقط دیوار'],['sheypoor','فقط شیپور']].map(([value,label])=><button type="button" key={value} aria-pressed={resultView===value} onClick={()=>setResultView(value!)}>{label}</button>)}</nav>}
+    {source!=='public'&&runtime&&visibleSources.map(site=><section className="source-workspace" key={site} hidden={source==='all'&&resultView!=='all'&&resultView!==site}><h2>{site==='divar'?'دیوار':'شیپور'} · آگهی‌ها و اطلاعات تماس</h2><CloudCaptureView key={`${runtime.local}:${version}:${site}`} localMode={runtime.local} sourceFilter={site}/></section>)}
     {(source==='public'||publicVisible)&&<section className="panel public-results"><div className="capture-results-heading"><h2>شماره‌های منابع عمومی ({publicContacts.length.toLocaleString('fa-IR')})</h2><a className="primary-button" href={`/api/export.xlsx${campaignId?`?campaignId=${campaignId}`:''}`}><Download size={16}/> دریافت اکسل</a></div>{publicContacts.length?publicContacts.map(lead=><article key={lead.id}><div><h3>{lead.title}</h3><span>{lead.city} · {lead.source}</span></div><a href={`tel:${lead.phone}`} dir="ltr">{lead.phone}</a><a href={lead.url} target="_blank" rel="noreferrer">مشاهدهٔ آگهی</a></article>):<p>هنوز شمارهٔ عمومی در این پویش یافت نشده است.</p>}</section>}
   </div>;
 }

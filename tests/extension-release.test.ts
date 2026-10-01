@@ -6,7 +6,7 @@ import { inflateRawSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { expect,it,vi } from 'vitest';
-const files=['manifest.json','background.js','page-reader.js','login.js','content.js','panel-bridge.js','popup.html','popup.js','options.html','options.js','update-check.js','INSTALL.txt'];
+const files=['manifest.json','background.js','page-reader.js','login.js','content.js','panel-bridge.js','popup.html','popup.css','popup.js','options.html','options.js','update-check.js','INSTALL.txt'];
 function unzip(zip:Buffer){const entries=new Map<string,Buffer>();let offset=0;while(zip.readUInt32LE(offset)===0x04034b50){const size=zip.readUInt32LE(offset+18),nameLength=zip.readUInt16LE(offset+26),extra=zip.readUInt16LE(offset+28),start=offset+30+nameLength+extra;expect(zip.readUInt16LE(offset+8)).toBe(8);const name=zip.subarray(offset+30,offset+30+nameLength).toString();const data=inflateRawSync(zip.subarray(start,start+size));expect(data.length).toBe(zip.readUInt32LE(offset+22));entries.set(name,data);offset=start+size;}expect(zip.readUInt32LE(offset)).toBe(0x02014b50);expect(zip.readUInt32LE(zip.length-22)).toBe(0x06054b50);return entries;}
 it('packages exactly the extension allowlist, is deterministic and detects edits without a version bump',()=>{
   const root=mkdtempSync(join(tmpdir(),'lead-radar-release-'));

@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
 
-export const extensionFiles=['manifest.json','background.js','page-reader.js','login.js','content.js','panel-bridge.js','popup.html','popup.js','options.html','options.js','update-check.js','INSTALL.txt'];
+export const extensionFiles=['manifest.json','background.js','page-reader.js','login.js','content.js','panel-bridge.js','popup.html','popup.css','popup.js','options.html','options.js','update-check.js','INSTALL.txt'];
 function crc32(bytes){let crc=0xffffffff;for(const byte of bytes){crc^=byte;for(let bit=0;bit<8;bit++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}return (crc^0xffffffff)>>>0;}
 export function extensionZip(entries){
   const local=[];const central=[];let offset=0;
