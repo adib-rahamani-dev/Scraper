@@ -86,6 +86,8 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
       const job=await jobGet();if(job?.source===source&&['running','paused'].includes(job.status))throw new Error('ابتدا صف این سایت را تمام یا متوقف کن.');
       const key=`capture-next-${source}`;const next=Number((await chrome.storage.local.get(key))[key]||0);
       if(next>Date.now())throw new Error(`برای رعایت ریت‌لیمیت، ${Math.ceil((next-Date.now())/1000)} ثانیه دیگر تلاش کن.`);
+      // Check that storage is reachable before revealing a selected contact.
+      await api('/api/extension/ping',undefined,'GET');
       await chrome.storage.local.set({[key]:Date.now()+30000});return {allowed:true};
     });
     if(panel&&!['status','configure','login','login-status','reveal-contact','search','stop','resume','focus','options'].includes(action))throw new Error('دستور پنل نامعتبر است.');

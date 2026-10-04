@@ -2,21 +2,20 @@
 <html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>رادار لید</title><link rel="stylesheet" href="popup.css"></head>
 <body>
 <header><h1>◉ رادار لید</h1><span id="installed-version" class="version" dir="ltr"></span></header>
-<p>جست‌وجوی منظم، تماس تأییدشده، خروجی اکسل</p>
-<div class="connection-card" id="update-test" role="status">✓ تست آپدیت A — این نشان فقط در بستهٔ جدید است.</div>
-<div class="connection-card"><div id="connection" role="status">در حال بررسی اتصال…</div><small>نسخهٔ بالای صفحه، نسخهٔ واقعاً نصب‌شده است.</small></div>
-<div class="connection-card"><button id="check-login" class="secondary">بررسی ورود قبلی دیوار و شیپور</button><div id="session-status" class="status" role="status">وضعیت ورود هنوز بررسی نشده است.</div></div>
-<details open><summary>جست‌وجو و استخراج جزئیات</summary><form id="search">
+<p>Chrome خودت · جزئیات آگهی · تماس انتخابی · اکسل</p>
+<div class="connection-card"><div id="connection" role="status">در حال بررسی اتصال…</div></div>
+<div class="toolbar"><button id="dashboard" class="secondary">پنل و اکسل</button><button id="check-login" class="secondary">بررسی ورود سایت‌ها</button></div><div id="session-status" class="status" role="status"></div>
+<details><summary>جست‌وجو از همین افزونه</summary><form id="search">
 <label>موضوع<input name="topic" placeholder="مثلاً کیف مدرسه" minlength="2" maxlength="80" required></label>
 <label>منبع<select name="source"><option value="divar">دیوار</option><option value="sheypoor">شیپور</option></select></label>
 <label>شهر<select name="city"><option value="iran">کل ایران</option><option value="tehran">تهران</option><option value="qazvin">قزوین</option><option value="karaj">کرج</option><option value="mashhad">مشهد</option><option value="isfahan">اصفهان</option><option value="shiraz">شیراز</option><option value="rasht">رشت</option><option value="tabriz">تبریز</option></select></label>
 <label>حداکثر آگهی بارگذاری‌شده<input name="limit" type="number" min="1" max="20" value="20"></label>
 <details><summary>لینک و فیلترهای دقیق‌تر</summary><label>لینک جست‌وجوی سایت<input name="url" type="url" placeholder="https://divar.ir/s/…"></label><small>برای محله یا دسته‌بندی، لینک فیلترشدهٔ همان سایت را وارد کن.</small></details>
-<button>شروع جست‌وجو و بررسی</button><small>افزونه یک صف اجرا دارد؛ روی کپچا توقف می‌کند. تماس هر آگهی با کلیک و تأیید خودت ثبت می‌شود.</small>
+<button>جمع‌آوری جزئیات</button><small>یک صف جزئیات؛ ثبت تماس کسب‌وکار یا دارای رضایت از دکمهٔ روی همان آگهی. کپچا: حل دستی، سپس ادامه.</small>
 </form></details>
 <div class="job-card"><strong>وضعیت صف</strong><div id="progress" class="status" role="status"></div><progress id="run-progress" aria-label="پیشرفت صف" hidden max="1" value="0"></progress><div class="actions"><button id="resume" class="secondary" hidden>حل کردم؛ ادامهٔ صف</button><button id="stop" class="secondary danger" hidden>توقف صف</button></div></div>
 <details><summary>ورود با شمارهٔ خودت</summary><form id="login"><label>شمارهٔ همراه<input name="phone" type="tel" autocomplete="tel" placeholder="0912…" required></label><label>سایت<select name="source"><option value="both">دیوار و شیپور</option><option value="divar">دیوار</option><option value="sheypoor">شیپور</option></select></label><button>بازکردن فرم و درخواست کد</button><small>کد تأیید فقط در برگهٔ رسمی سایت وارد می‌شود؛ شمارهٔ ورود به سرور فرستاده نمی‌شود.</small></form><div class="status" id="login-state"></div></details>
-<div class="toolbar"><button id="dashboard" class="secondary">پنل و خروجی اکسل</button><button id="options" class="secondary">تنظیم اتصال</button></div>
+<details><summary>تنظیمات</summary><button id="options" class="secondary">تنظیم اتصال پنل</button></details>
 <div id="status" class="status" role="status"></div>
 <script src="popup.js"></script><script src="update-check.js"></script>
 </body></html>

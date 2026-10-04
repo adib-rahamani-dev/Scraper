@@ -5,11 +5,11 @@ function worker(initial:Record<string,unknown>={}){
   const local:Record<string,any>={leadRadarToken:'test-key',...initial};const session:Record<string,any>={};const listeners:Record<string,Function>={};const requests:Array<{path:string;body:any}>=[];const alarms:Record<string,unknown>={};
   const store=(items:Record<string,any>)=>({get:async(keys:string|string[])=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(k=>[k,structuredClone(items[k])])),set:async(value:any)=>Object.assign(items,structuredClone(value)),remove:async(key:string)=>{delete items[key];}});
   const chrome={runtime:{id:'test',getManifest:()=>({version:'2.9.0'}),getURL:(p:string)=>`chrome-extension://test/${p}`,openOptionsPage:async()=>{},onMessage:{addListener:(fn:Function)=>listeners.message=fn},onStartup:{addListener:(fn:Function)=>listeners.startup=fn}},action:{setBadgeText:vi.fn(async()=>{}),setBadgeBackgroundColor:vi.fn(async()=>{})},storage:{local:store(local),session:store(session)},tabs:{query:vi.fn(async()=>[] as Array<{id:number;url:string;active?:boolean}>),get:vi.fn(async(id:number)=>({id,url:'https://divar.ir/v/item/1'})),create:vi.fn(async()=>({id:12})),update:vi.fn(async()=>({id:12})),sendMessage:vi.fn(async()=>({ad:{source:'divar',url:'https://divar.ir/v/item/1',title:'موبایل',description:'جزئیات'}})),onRemoved:{addListener:(fn:Function)=>listeners.removed=fn}},alarms:{create:async(name:string,value:any)=>{alarms[name]=value;},clear:async(name:string)=>{delete alarms[name];},onAlarm:{addListener:(fn:Function)=>listeners.alarm=fn}}};
-  const fetch=async(url:string,options:any)=>{requests.push({path:new URL(url).pathname,body:options.body?JSON.parse(options.body):null});return {ok:true,json:async()=>url.endsWith('/runs')?{id:'run-1',source:'divar',status:'running',processed:0,failed:0,total:1,topic:'موبایل'}:{saved:1}};};
+  const fetch=vi.fn(async(url:string,options:any)=>{requests.push({path:new URL(url).pathname,body:options.body?JSON.parse(options.body):null});return {ok:true,json:async()=>url.endsWith('/runs')?{id:'run-1',source:'divar',status:'running',processed:0,failed:0,total:1,topic:'موبایل'}:{saved:1}};});
   runInNewContext(readFileSync('extension/background.js','utf8'),{chrome,URL,AbortSignal,fetch,Date,Set,Promise,Error,setTimeout});
   const send=(message:any,sender:any={id:'test',url:'chrome-extension://test/popup.html'})=>new Promise<any>(resolve=>listeners.message!(message,sender,resolve));
   const settle=async()=>{await new Promise(r=>setTimeout(r,25));};
-  return {local,session,requests,chrome,send,listeners,settle,alarms};
+  return {local,session,requests,chrome,send,listeners,settle,alarms,fetch};
 }
 it.each(['http://127.0.0.1:4300','https://lead-radar-jade.vercel.app'])('opens the configured dashboard rather than an obsolete development port: %s',async(endpoint)=>{
   const w=worker({leadRadarEndpoint:endpoint});expect((await w.send({action:'dashboard'})).error).toBeUndefined();expect(w.chrome.tabs.create).toHaveBeenCalledWith({url:endpoint});
@@ -28,8 +28,14 @@ it('allows one selected-ad contact permit only with confirmation and retains its
   expect((await w.send({...message,payload:{...message.payload,url:'https://divar.ir/v/other/2'}},sender)).error).toBeTruthy();
   expect((await w.send(message,sender)).result.allowed).toBe(true);
   expect((await w.send(message,sender)).error).toContain('ریت‌لیمیت');
-  expect(w.requests).toHaveLength(0);expect(w.chrome.tabs.update).not.toHaveBeenCalled();
+  expect(w.requests).toEqual([{path:'/api/extension/ping',body:null}]);expect(w.chrome.tabs.update).not.toHaveBeenCalled();
   expect((await w.send(message,{id:'test',url:'https://lead-radar-jade.vercel.app/'})).error).toBeTruthy();
+});
+it('does not reveal or consume contact cooldown when backend authorization is broken',async()=>{
+  const w=worker();w.fetch.mockResolvedValueOnce({ok:false,json:async()=>({error:'کلید منقضی شده'})} as any);
+  const sender={id:'test',url:'https://divar.ir/v/item/1',tab:{id:5}};
+  const result=await w.send({action:'contact-permit',payload:{source:'divar',url:sender.url,basis:'public-business',confirmed:true}},sender);
+  expect(result.error).toContain('منقضی');expect(w.local['capture-next-divar']).toBeUndefined();expect(w.chrome.tabs.sendMessage).not.toHaveBeenCalled();
 });
 it('rejects a foreign sender and keeps login phones out of persistent storage and backend',async()=>{
   const w=worker();expect((await w.send({action:'login',phone:'09123456789',source:'divar'},{url:'https://evil.example',id:'test'})).error).toBeTruthy();

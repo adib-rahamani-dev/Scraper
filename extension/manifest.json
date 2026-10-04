@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "رادار لید | مرورگر و استخراج آگهی",
-  "version": "2.9.0",
+  "version": "2.9.1",
   "description": "ورود در سایت اصلی و استخراج جزئیات عمومی آگهی‌های جست‌وجو، با خروجی اکسل و پنل خصوصی.",
   "permissions": ["storage", "alarms"],
   "host_permissions": ["https://lead-radar-jade.vercel.app/*", "http://127.0.0.1:4300/*", "https://divar.ir/*", "https://www.divar.ir/*", "https://sheypoor.com/*", "https://www.sheypoor.com/*"],

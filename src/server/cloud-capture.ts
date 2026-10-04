@@ -84,7 +84,8 @@ export function saveCapturedContact(sourceValue: unknown, raw: unknown) {
   if (input.confirmed !== true) throw new Error('تأیید مجاز بودن ارتباط لازم است.');
   const basis = input.basis === 'direct-consent' || input.basis === 'public-business' ? input.basis : null;
   if (!basis) throw new Error('مبنای مجاز ارتباط را انتخاب کن.');
-  if (input.contactSource !== 'visible-after-manual-reveal') throw new Error('شماره باید ابتدا به‌صورت دستی در سایت نمایان شده باشد.');
+  const contactSource = input.contactSource === 'visible-after-manual-reveal' || input.contactSource === 'visible-after-selected-reveal' ? input.contactSource : null;
+  if (!contactSource) throw new Error('شماره باید در بخش تماس همین آگهی نمایان شده باشد.');
   const phone = normalizeIranianPhone(String(input.phone ?? ''));
   if (!phone) throw new Error('شمارهٔ تماس معتبر نیست.');
   const item = normalizeCapture(source, input.ad);
@@ -95,8 +96,8 @@ export function saveCapturedContact(sourceValue: unknown, raw: unknown) {
     insertOrEnrich(item, 'detail');
     const current = db.prepare('SELECT phone FROM captured_ads WHERE url = ?').get(item.url) as { phone: string | null };
     if (current.phone && current.phone !== phone) throw new Error('این آگهی قبلاً شمارهٔ دیگری دارد.');
-    db.prepare(`UPDATE captured_ads SET phone = ?, contact_basis = ?, contact_source = 'visible-after-manual-reveal', updated_at = ? WHERE url = ?`)
-      .run(phone, basis, new Date().toISOString(), item.url);
+    db.prepare(`UPDATE captured_ads SET phone = ?, contact_basis = ?, contact_source = ?, updated_at = ? WHERE url = ?`)
+      .run(phone, basis, contactSource, new Date().toISOString(), item.url);
     db.exec('COMMIT');
   } catch (error) { db.exec('ROLLBACK'); throw error; }
   return db.prepare('SELECT * FROM captured_ads WHERE url = ?').get(item.url) as CapturedAd;
