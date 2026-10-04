@@ -1,7 +1,7 @@
 import express, { type ErrorRequestHandler } from 'express';
 import helmet from 'helmet';
 import { resolve } from 'node:path';
-import { closeAllBrowsers, closeBrowser, browserOpen, navigateSearch, openBrowser, openDetail, selectedPage, startOfficialLogin, tabs } from './browser.js';
+import { closeAllBrowsers, closeBrowser, browserOpen, browserLoginStatus, navigateSearch, openBrowser, openDetail, selectedPage, startOfficialLogin, tabs } from './browser.js';
 import { adsCsv, db, getAd, getAds, updateAd } from './store.js';
 import { cleanText, detailUrl, parseSource, searchPageContext, searchUrl, sources } from './policy.js';
 import { normalizeIranianPhone } from '../server/extractor.js';
@@ -45,12 +45,22 @@ app.post('/api/browser/:source/open', async (req, res) => {
   await openBrowser(source);
   res.json({ open: true, tabs: await tabs(source) });
 });
+app.post('/api/browser/:source/open-ad',async(req,res)=>{
+  const source=parseSource(req.params.source);assertSourceAvailable(source);
+  const page=await openDetail(source,String(req.body.url??''));
+  const result=await captureCurrentDetail(source,page);
+  res.json({ad:result.ad,tabs:await tabs(source)});
+});
 app.post('/api/browser/:source/close', async (req, res) => {
   await closeBrowser(parseSource(req.params.source));
   res.json({ open: false });
 });
 app.post('/api/browser/:source/login', async (req, res) => {
   res.json({ message: await startOfficialLogin(parseSource(req.params.source),String(req.body.phone??'')) });
+});
+app.post('/api/browser/:source/login-status',async(req,res)=>{
+  const source=parseSource(req.params.source);assertSourceAvailable(source);
+  res.json(await browserLoginStatus(source));
 });
 app.get('/api/capture-runs',(_req,res)=>res.json(listCaptureRuns(db,'saved_ads').map(run=>{const {queue_state:_,...visible}=run as typeof run & {queue_state?:string};return {...visible,...detailJobProgress(run.id)};})));
 app.get('/api/capture-runs/history',(_req,res)=>res.json(historyCounts(db,'saved_ads_runs')));

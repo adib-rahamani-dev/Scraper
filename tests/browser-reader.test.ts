@@ -44,6 +44,11 @@ it('does not treat a generic Sheypoor description expander as a contact button',
   const url='https://www.sheypoor.com/v/contact-fixture-3.html';const page=await fixture(url,'<main><h1>نمونه</h1><button>نمایش کامل</button><p>09123456789</p></main>');await page.evaluate(reader);
   await expect(page.evaluate(options=>(globalThis as any).LeadRadarReader.revealContact(options),{...contactOptions,expectedUrl:url})).rejects.toThrow('شناخته نشد');await page.close();
 });
+it('reveals Sheypoor seller contacts even when no description phone widget exists',async()=>{
+  const url='https://www.sheypoor.com/v/contact-fixture-4.html';const page=await fixture(url,'<main><h1>فروشگاه نمونه</h1><div id="row"><span>شماره تماس تأییدشده</span><b>۰۹۱۲XXX۶۷۸۹</b></div><button id="contact">تماس با ۰۹۱۲XXX۶۷۸۹</button></main>');
+  await page.evaluate(()=>{(globalThis as any).clicks=0;const doc=(globalThis as any).document;doc.querySelector('#contact').onclick=()=>{(globalThis as any).clicks++;doc.querySelector('#row b').innerText='۰۹۱۲۳۴۵۶۷۸۹';};});await page.evaluate(reader);
+  expect(await page.evaluate(options=>(globalThis as any).LeadRadarReader.revealContact(options),{...contactOptions,expectedUrl:url})).toBe('09123456789');expect(await page.evaluate(()=>(globalThis as any).clicks)).toBe(1);await page.close();
+});
 it('reports a Divar hidden-number listing immediately instead of pretending extraction succeeded',async()=>{
   const page=await fixture(contactOptions.expectedUrl,'<main><h1>نمونه</h1><section><div class="post-actions"><button>اطلاعات تماس</button></div><p>شماره مخفی شده است</p><button>پیام در چت</button></section></main>');await page.evaluate(reader);
   await expect(page.evaluate(options=>(globalThis as any).LeadRadarReader.revealContact(options),contactOptions)).rejects.toThrow('مخفی کرده');await page.close();
@@ -91,4 +96,23 @@ it('fills the official phone field, submits once, and leaves the OTP entry to th
   await page.evaluate(()=>{const doc=(globalThis as any).document;(globalThis as any).submits=0;doc.querySelector('form').onsubmit=(e:{preventDefault:()=>void})=>{e.preventDefault();(globalThis as any).submits++;doc.querySelector('form').innerHTML='<input autocomplete="one-time-code" name="otp"><p>کد تأیید را وارد کنید</p>';};});
   await page.evaluate(login);const result=await page.evaluate(()=> (globalThis as any).LeadRadarLogin.login('۰۹۱۲۳۴۵۶۷۸۹'));expect(result.state).toBe('awaiting-code');
   await page.evaluate(()=> (globalThis as any).LeadRadarLogin.login('09123456789'));expect(await page.evaluate(()=> (globalThis as any).submits)).toBe(1);expect(await page.locator('input[name="otp"]').inputValue()).toBe('');await page.close();
+});
+it.each(['divar','sheypoor'])('confirms an existing %s login from a visible logout control without sending an SMS',async(source)=>{
+  const url=source==='divar'?'https://divar.ir/s/tehran':'https://www.sheypoor.com/session/myAccount';
+  const page=await fixture(url,'<button>خروج از حساب کاربری</button><input name="phone" hidden>');await page.evaluate(login);
+  expect((await page.evaluate(()=>(globalThis as any).LeadRadarLogin.status())).state).toBe('signed-in');
+  expect((await page.evaluate(()=>(globalThis as any).LeadRadarLogin.login('09123456789'))).state).toBe('signed-in');await page.close();
+});
+it('checks the Divar menu once and restores it without clicking login or submitting',async()=>{
+  const page=await fixture('https://divar.ir/s/tehran','<button id="menu" aria-expanded="false">دیوار من</button><div id="account" hidden><button>خروج از حساب کاربری</button></div>');
+  await page.evaluate(()=>{const doc=(globalThis as any).document;(globalThis as any).clicks=0;doc.querySelector('#menu').onclick=()=>{(globalThis as any).clicks++;const account=doc.querySelector('#account');account.hidden=!account.hidden;doc.querySelector('#menu').setAttribute('aria-expanded',String(!account.hidden));};});await page.evaluate(login);
+  expect((await page.evaluate(()=>(globalThis as any).LeadRadarLogin.status({inspect:true}))).state).toBe('signed-in');
+  expect(await page.evaluate(()=>(globalThis as any).clicks)).toBe(2);expect(await page.locator('#account').isVisible()).toBe(false);await page.close();
+});
+it('does not invent a login from an account navigation link or an ad mentioning logout',async()=>{
+  const page=await fixture('https://www.sheypoor.com/v/sample-1.html','<h1>آگهی</h1><a href="/session/myAccount">آگهی‌های من</a><p>خروج از حساب کاربری</p>');await page.evaluate(login);
+  expect((await page.evaluate(()=>(globalThis as any).LeadRadarLogin.status({inspect:true}))).state).toBe('unknown');await page.close();
+});
+it.each([['<input name="phone">','signed-out'],['<input autocomplete="one-time-code">','awaiting-code']])('reports actual login form state without reading its values',async(html,state)=>{
+  const page=await fixture('https://divar.ir',html);await page.evaluate(login);expect((await page.evaluate(()=>(globalThis as any).LeadRadarLogin.status())).state).toBe(state);await page.close();
 });

@@ -60,6 +60,24 @@ export async function openBrowser(source: BrowserSource): Promise<BrowserContext
 export function browserOpen(source: BrowserSource): boolean {
   return contexts.has(source);
 }
+export async function browserLoginStatus(source:BrowserSource) {
+  const context=contexts.get(source);const page=context?.pages().filter(page=>!page.isClosed()).at(-1);
+  if(!page)return {source,state:'not-open',message:'مرورگر همراه این سایت باز نیست'};
+  await page.evaluate(readFileSync(resolve('extension/login.js'),'utf8'));
+  let result=await page.evaluate(async()=>{
+    const reader=(globalThis as unknown as {LeadRadarLogin:{status:(options:{inspect:boolean})=>Promise<{state:string;message:string}>;diagnostics:()=>unknown}}).LeadRadarLogin;
+    const result=await reader.status({inspect:true});return {...result,...(result.state==='unknown'?{accountControls:reader.diagnostics()}:{})};
+  });
+  if(source==='sheypoor'&&result.state==='unknown'){
+    const probe=await context!.newPage();
+    try{
+      await probe.goto('https://www.sheypoor.com/session/myAccount/myListings/all',{waitUntil:'domcontentloaded',timeout:20000});
+      await probe.evaluate(readFileSync(resolve('extension/login.js'),'utf8'));
+      result=await probe.evaluate(()=> (globalThis as unknown as {LeadRadarLogin:{status:(options:{waitReady:boolean})=>Promise<{state:string;message:string}>}}).LeadRadarLogin.status({waitReady:true}));
+    }finally{await probe.close();}
+  }
+  return {source,...result};
+}
 
 export async function closeBrowser(source: BrowserSource): Promise<void> {
   await contexts.get(source)?.close();
@@ -110,6 +128,8 @@ export async function openDetail(source: BrowserSource, input: string): Promise<
 
 export async function startOfficialLogin(source: BrowserSource, phone=''): Promise<string> {
   const context = await openBrowser(source);
+  const existing=await browserLoginStatus(source);
+  if(existing.state==='signed-in'||existing.state==='awaiting-code')return existing.message;
   const page = context.pages().at(-1) ?? await context.newPage();
   await page.bringToFront();
   if(source==='sheypoor') {

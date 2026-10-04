@@ -48,7 +48,7 @@
     }
     // Divar can render the revealed number as a normal row beside the label "شماره موبایل".
     for(const label of document.querySelectorAll('span,dt,label,div,p,strong')) {
-      if(!visible(label)||!/^(شماره موبایل|شماره همراه|شماره تماس(?: تایید شده| تأیید شده)?|تلفن تماس|تلفن|mobile number|phone number)$/i.test(labelText(label.textContent)))continue;
+      if(!visible(label)||!/^(شماره موبایل|شماره همراه|شماره تماس(?:\s*ت[اأ]یید[\s‌]*شده)?|تلفن تماس|تلفن|mobile number|phone number)$/i.test(labelText(label.textContent)))continue;
       let row=label.parentElement;
       for(let level=0;row&&level<3;level++,row=row.parentElement){if(row.matches('main,body,[role="main"]')||row.querySelector('h1,h2'))break;add(row);if(/(?:\+98|0098|0|۰)[9۹]/.test(clean(row.innerText,500)))break;}
     }
@@ -77,6 +77,14 @@
     // Sheypoor's real contact control is a clickable span, not a button.
     // Require the masked-phone shape; never click an arbitrary description expander.
     if(!candidates.length&&source()==='sheypoor')candidates=[...document.querySelectorAll('span')].filter(node=>visible(node)&&!node.closest('#lead-radar-extension,#lead-radar-floating-panel')&&/^09\d{2}[Xx*]{3}\d{4}\s*\(نمایش\s*کامل\)$/.test(digits(labelText(node.innerText))));
+    // Many Sheypoor ads have no phone widget in the description: their actual
+    // seller-contact button reads "تماس با ۰۹...XXX...", not "تماس با فروشنده".
+    if(!candidates.length&&source()==='sheypoor')candidates=[...document.querySelectorAll('button,[role="button"]')].filter(node=>{
+      if(!visible(node)||node.disabled||node.getAttribute('aria-disabled')==='true'||node.closest('#lead-radar-extension,#lead-radar-floating-panel'))return false;
+      const label=digits(labelText(node.innerText||node.getAttribute('aria-label')));
+      const masked=label.replace(/^تماس\s*با\s*/, '').replace(/\s/g,'');
+      return /^تماس\s*با\s*/.test(label)&&/^0[1-9][0-9Xx*]{9}$/.test(masked)&&/[Xx*]/.test(masked);
+    });
     if(candidates.length!==1)throw new Error(candidates.length?'چند دکمهٔ تماس نمایان است؛ بخش تماس را خودت در سایت باز کن.':'دکمهٔ اطلاعات تماس شناخته نشد؛ آن را خودت در سایت باز کن.');
     candidates[0].click(); // One explicitly selected ad, one click, no retry or bulk queue.
     const deadline=Date.now()+Math.min(8000,Math.max(200,Number(timeout)||8000));

@@ -2,6 +2,7 @@ const $=id=>document.getElementById(id);
 const send=async(action,data={})=>{const result=await chrome.runtime.sendMessage({action,...data});if(result.error)throw new Error(result.error);return result.result;};
 function notice(message){$('status').textContent=message;}
 $('installed-version').textContent='v'+chrome.runtime.getManifest().version;
+$('check-login').onclick=async()=>{const button=$('check-login');button.disabled=true;try{const result=await send('login-status');$('session-status').textContent=result.sites.map(site=>`${site.source==='divar'?'دیوار':'شیپور'}: ${site.message}`).join('\n');}catch(error){$('session-status').textContent=error.message;}finally{button.disabled=false;}};
 for(const name of ['login','search'])$(name).onsubmit=async event=>{
   event.preventDefault();const form=event.currentTarget;const data=Object.fromEntries(new FormData(form));const button=form.querySelector('button');button.disabled=true;
   try{await send(name,data);if(name==='login')form.elements.phone.value='';notice(name==='login'?'فرم سایت باز می‌شود؛ کد را در سایت وارد کن.':'جست‌وجو شروع شد؛ پیشرفت در افزونه و پنل نمایش داده می‌شود.');}catch(error){notice(error.message);}finally{button.disabled=false;}

@@ -88,8 +88,41 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
       if(next>Date.now())throw new Error(`برای رعایت ریت‌لیمیت، ${Math.ceil((next-Date.now())/1000)} ثانیه دیگر تلاش کن.`);
       await chrome.storage.local.set({[key]:Date.now()+30000});return {allowed:true};
     });
-    if(panel&&!['status','configure','login','search','stop','resume','focus','options'].includes(action))throw new Error('دستور پنل نامعتبر است.');
-    if(action==='status'&&(own||panel)){const state=await chrome.storage.local.get(['captureJob','leadRadarToken','leadRadarEndpoint']);const job=state.captureJob;return {connected:Boolean(state.leadRadarToken),endpoint:state.leadRadarEndpoint,job:job?{id:job.id,source:job.source,status:job.status,processed:job.processed,total:job.total,index:job.index,message:job.message,pausedAt:job.pausedAt||'',resumable:job.status==='paused'}:null};}
+    if(panel&&!['status','configure','login','login-status','reveal-contact','search','stop','resume','focus','options'].includes(action))throw new Error('دستور پنل نامعتبر است.');
+    if(action==='login-status'&&(own||panel)){
+      const results=[];
+      for(const s of ['divar','sheypoor']){
+        const candidates=await chrome.tabs.query({url:hosts[s].map(host=>`https://${host}/*`)});
+        const tab=candidates.find(tab=>tab.active)||candidates.at(-1);
+        let state={source:s,state:'not-open',message:'برگهٔ این سایت در همین مرورگر باز نیست'};
+        if(tab)try{
+          const result=await chrome.tabs.sendMessage(tab.id,{command:'login-status',inspect:true});state=result?.error?{source:s,state:'unknown',message:result.error}:{...result,source:s};
+          if(s==='sheypoor'&&state.state==='unknown'&&!result?.error){
+            const probe=await chrome.tabs.create({url:'https://www.sheypoor.com/session/myAccount/myListings/all',active:false});
+            try{
+              const deadline=Date.now()+12000;
+              while(Date.now()<deadline){try{const checked=await chrome.tabs.sendMessage(probe.id,{command:'login-status',waitReady:true});if(checked?.error)throw new Error(checked.error);state={...checked,source:s};break;}catch(error){if(!/Receiving end|Could not establish|message port/.test(error.message))throw error;}await new Promise(resolve=>setTimeout(resolve,400));}
+            }finally{await chrome.tabs.remove(probe.id).catch(()=>{});}
+          }
+        }catch{state={source:s,state:'unknown',message:'اسکریپت افزونه در برگه آماده نیست؛ برگه را تازه کن'};}
+        results.push(state);
+      }
+      return {sites:results,version:chrome.runtime.getManifest().version};
+    }
+    if(action==='reveal-contact'&&(own||panel)){
+      const s=message.source;if(!hosts[s]||message.confirmed!==true||!['direct-consent','public-business'].includes(message.basis))throw new Error('تأیید و مبنای مجاز ثبت تماس همین آگهی لازم است.');
+      const url=official(message.url,s,'v');const job=await jobGet();if(job?.source===s&&['running','paused'].includes(job.status))throw new Error('ابتدا صف این سایت را تمام یا متوقف کن.');
+      const candidates=await chrome.tabs.query({url:hosts[s].map(host=>`https://${host}/*`)});
+      let tab=candidates.find(tab=>{try{return official(tab.url,s,'v')===url;}catch{return false;}});
+      if(!tab)tab=await chrome.tabs.create({url,active:true});else await chrome.tabs.update(tab.id,{active:true});
+      // Retry readiness only; dispatch the consequential contact click exactly once.
+      let ready=false;const deadline=Date.now()+15000;
+      while(Date.now()<deadline){try{const result=await chrome.tabs.sendMessage(tab.id,{command:'contact-ready'});if(result?.ready){ready=true;break;}if(result?.error&&!/هنوز|بارگذاری/.test(result.error))throw new Error(result.error);}catch(error){if(!/Receiving end|Could not establish|message port|هنوز|بارگذاری/.test(error.message))throw error;}await new Promise(resolve=>setTimeout(resolve,400));}
+      if(!ready)throw new Error('آگهی آماده نشد؛ برگهٔ سایت را تازه کن و نسخهٔ نصب‌شدهٔ افزونه را بررسی کن.');
+      const result=await chrome.tabs.sendMessage(tab.id,{command:'reveal-contact',basis:message.basis,confirmed:true,expectedUrl:url});
+      if(result?.error)throw new Error(result.error);if(result?.saved!==true)throw new Error('ذخیرهٔ شماره تأیید نشد.');return result;
+    }
+    if(action==='status'&&(own||panel)){const state=await chrome.storage.local.get(['captureJob','leadRadarToken','leadRadarEndpoint']);const job=state.captureJob;return {connected:Boolean(state.leadRadarToken),endpoint:state.leadRadarEndpoint,version:chrome.runtime.getManifest().version,capabilities:['login-status','reveal-contact'],job:job?{id:job.id,source:job.source,status:job.status,processed:job.processed,total:job.total,index:job.index,message:job.message,pausedAt:job.pausedAt||'',resumable:job.status==='paused'}:null};}
 if(action==='configure'&&panel){if(typeof message.token!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(message.token))throw new Error('کلید اتصال نامعتبر است.');const endpoint=new URL(sender.url).hostname==='lead-radar-jade.vercel.app'?CLOUD_API:LOCAL_API;const job=await jobGet();if(job&&['running','paused'].includes(job.status))throw new Error('ابتدا اجرای فعال را متوقف کن.');await chrome.storage.local.set({leadRadarToken:message.token,leadRadarEndpoint:endpoint});return {connected:true};}
     if(action==='options'){await chrome.runtime.openOptionsPage();return {};}
     if(action==='dashboard'){const {leadRadarEndpoint}=await chrome.storage.local.get('leadRadarEndpoint');await chrome.tabs.create({url:leadRadarEndpoint===LOCAL_API?LOCAL_API:CLOUD_API});return {};}
@@ -105,6 +138,9 @@ if(action==='configure'&&panel){if(typeof message.token!=='string'||!/^[A-Za-z0-
       const phone=String(message.phone||'').replace(/[۰-۹]/g,c=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(c))).replace(/[\s-]/g,'');if(!/^09\d{9}$/.test(phone))throw new Error('شمارهٔ همراه معتبر وارد کن.');
       for(const s of message.source==='both'?['divar','sheypoor']:[message.source]){
         if(!hosts[s])throw new Error('سایت نامعتبر است.');
+        const candidates=await chrome.tabs.query({url:hosts[s].map(host=>`https://${host}/*`)});
+        const existing=candidates.find(tab=>tab.active)||candidates.at(-1);
+        if(existing)try{const state=await chrome.tabs.sendMessage(existing.id,{command:'login-status',inspect:true});if(['signed-in','awaiting-code'].includes(state?.state)){await chrome.storage.local.set({[`loginState-${s}`]:{state:state.state,message:state.message,updatedAt:Date.now()}});await chrome.tabs.update(existing.id,{active:true});continue;}}catch{/* A fresh official page remains the fallback, never an SMS retry. */}
         const tab=await chrome.tabs.create({url:'about:blank',active:true});
         await chrome.storage.session.set({[`login-${tab.id}`]:{source:s,phone,state:'pending',expires:Date.now()+120000}});
         await chrome.alarms.create(`login-expire-${tab.id}`,{when:Date.now()+120000});

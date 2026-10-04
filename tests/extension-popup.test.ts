@@ -3,7 +3,7 @@ import {runInNewContext} from 'node:vm';
 import {expect,it,vi} from 'vitest';
 
 async function popup(state:Record<string,unknown>) {
-  const ids=['installed-version','connection','progress','run-progress','resume','stop','login-state','status','options','dashboard','login','search'];
+  const ids=['installed-version','connection','progress','run-progress','resume','stop','login-state','status','options','dashboard','login','search','check-login','session-status'];
   const elements=Object.fromEntries(ids.map(id=>[id,{textContent:'',hidden:false,max:0,value:0,onclick:null,onsubmit:null}]));
   const chrome={runtime:{getManifest:()=>({version:'2.8.0'}),sendMessage:vi.fn()},storage:{local:{get:async()=>state},onChanged:{addListener:vi.fn()}}};
   runInNewContext(readFileSync('extension/popup.js','utf8'),{document:{getElementById:(id:string)=>elements[id]},chrome});

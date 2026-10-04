@@ -28,6 +28,14 @@ export default function RadarWorkspace({onPublicSearch,onChanged,publicLeads,cam
   const [resultView,setResultView]=useState('all');
   const [extensionVersion,setExtensionVersion]=useState('');
   const [lastSync,setLastSync]=useState<string>('');
+  const [loginStatus,setLoginStatus]=useState<Array<{source:string;state:string;message:string}>>([]);
+  const [installedVersion,setInstalledVersion]=useState('');
+  const [sessionContext,setSessionContext]=useState('');
+  const checkLogin=async(useExtension=false)=>{
+    setSessionContext(runtime?.local&&!useExtension?'مرورگر همراه محلی':'مرورگر شخصیِ دارای افزونه');
+    if(runtime?.local&&!useExtension){const results=await Promise.allSettled(['divar','sheypoor'].map(site=>api<{source:string;state:string;message:string}>(`/api/companion/browser/${site}/login-status`,{})));setLoginStatus(results.map((result,index)=>result.status==='fulfilled'?result.value:{source:['divar','sheypoor'][index]!,state:'unknown',message:String(result.reason?.message||'بررسی ورود ممکن نشد')}));}
+    else {const result=await browserCommand<{sites:Array<{source:string;state:string;message:string}>;version:string}>('login-status');setLoginStatus(result.sites);setInstalledVersion(result.version);}
+  };
   const latestRuns=['divar','sheypoor'].map(site=>runs.find(run=>run.source===site)).filter(Boolean) as Run[];
   const activeRuns=latestRuns.filter(run=>run.status==='running');
   const pausedRuns=latestRuns.filter(run=>run.status==='paused');
@@ -110,6 +118,9 @@ export default function RadarWorkspace({onPublicSearch,onChanged,publicLeads,cam
       {source!=='public'&&<label className="phone-only-control"><input type="checkbox" checked={includePublic} disabled={busy} onChange={event=>setIncludePublic(event.target.checked)}/> منابع عمومی رادار هم هم‌زمان فعال شوند</label>}
       <div className="radar-progress" role="status"><span>{progress||'در حال بررسی اتصال…'}</span><button className="ghost-button" onClick={()=>void stop()}><Square size={14}/> توقف همه</button></div>
       {message&&<p className="radar-message" role="status">{message}</p>}
+      <div className="radar-progress"><button className="ghost-button" disabled={busy||!runtime} onClick={()=>void perform(()=>checkLogin())}>{runtime?.local?'بررسی ورود مرورگر همراه':'بررسی ورود قبلی دیوار و شیپور'}</button>{runtime?.local&&<button className="ghost-button" disabled={busy} onClick={()=>void perform(()=>checkLogin(true))}>بررسی ورود مرورگر شخصی با افزونه</button>}{installedVersion&&<span>نسخهٔ واقعاً نصب‌شده: {installedVersion}</span>}</div>
+      {sessionContext&&<small>محل بررسی: {sessionContext}؛ نشست مرورگر همراه با Chrome شخصی جداست.</small>}
+      {loginStatus.map(site=><p className="radar-message" role="status" key={site.source}>{site.source==='divar'?'دیوار':'شیپور'}: {site.message}</p>)}
       <CaptureAlerts runs={runs} busy={busy} onFocus={run=>void perform(async()=>{if(runtime?.local)await api(`/api/companion/capture-runs/${run.id}/focus`,{});else await browserCommand('focus');})} onResume={run=>void perform(async()=>{if(runtime?.local)await api(`/api/companion/capture-runs/${run.id}/resume`,{});else await browserCommand('resume');setMessage('ادامه از محل توقف درخواست شد؛ اگر کپچا باقی مانده باشد صف دوباره متوقف می‌شود.');})}/>
     </section>
     <details className="panel radar-login"><summary><Phone size={16}/> ورود به دیوار و شیپور</summary><form onSubmit={event=>{event.preventDefault();void perform(login);}}><label>شمارهٔ همراه خودت<input type="tel" inputMode="tel" value={phone} onChange={event=>setPhone(event.target.value)} required autoComplete="tel" placeholder="0912…"/></label><button className="primary-button" disabled={busy||!runtime}>آماده‌کردن ورود هر دو سایت</button><p>کد پیامکی را در سایت اصلی وارد کن. نمایش و ثبت تماس یک آگهی همچنان نیازمند اقدام و تأیید خودت است.</p></form></details>
