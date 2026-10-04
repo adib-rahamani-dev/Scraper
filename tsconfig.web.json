@@ -18,5 +18,5 @@
     "tsBuildInfoFile": "./node_modules/.cache/tsconfig.web.tsbuildinfo",
     "composite": true
   },
-  "include": ["src/web/**/*.ts", "src/web/**/*.tsx", "src/shared/types.ts", "src/shared/capture-alerts.ts", "vite.config.ts"]
+  "include": ["src/web/**/*.ts", "src/web/**/*.tsx", "src/shared/types.ts", "src/shared/capture-alerts.ts", "src/shared/alert-tone.ts", "vite.config.ts"]
 }
