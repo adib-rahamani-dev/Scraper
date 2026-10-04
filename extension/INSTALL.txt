@@ -1,4 +1,4 @@
-رادار لید — نسخهٔ ۲.۶
+رادار لید — نسخهٔ ۲.۸.۲
 
 ۱. ZIP را استخراج کنید.
 ۲. در Chrome از chrome://extensions یا در Edge از edge://extensions وارد شوید.
